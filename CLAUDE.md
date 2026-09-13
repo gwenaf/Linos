@@ -15,7 +15,8 @@ Blind test open-source, portable, hors ligne. Un binaire Go unique sert la page 
 ```
 cmd/linos/          point d'entrée, câblage uniquement
 internal/server/    HTTP, routes, service du front embarqué
-internal/ws/        protocole temps réel : join, buzz, validate, score
+internal/game/      logique de jeu (salon, lobby, buzz, scores, états), testable sans réseau
+internal/ws/        transport WebSocket : rôles, lecture/écriture vers game.Room
 internal/qrcode/    QR code de l'URL de connexion
 internal/network/   2 modes (WiFi, hotspot Windows) : ne change que l'URL ; pare-feu
 internal/mdns/      annonce blindtest.local

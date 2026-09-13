@@ -5,6 +5,7 @@ Décisions techniques prises. Les specs fonctionnelles sont dans `SPECS.md`, le 
 ## 1. État de partie et chrono
 
 - Tout est hébergé sur le PC hôte. Le serveur Go fait autorité sur l'état, les règles, les scores et les chronos.
+- La logique de jeu vit dans `internal/game`, sans dépendance réseau ; `internal/ws` ne fait que transporter les messages. Les tests de jeu s'exécutent sans WebSocket.
 - Chaque salon est géré par **une seule goroutine** propriétaire de son état. Les messages WebSocket entrants et les ticks de chrono (`time.AfterFunc`) lui parviennent par un canal. L'ordre des événements est ainsi garanti, sans mutex.
 - Le chrono tourne dans le serveur. La page `/host` affiche le temps reçu du serveur. Un rechargement de page n'interrompt pas la partie.
 - Le chrono d'une piste démarre à réception de `media-started` envoyé par `/host`.

@@ -29,7 +29,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 ### Connexion et lobby
 
 - `join` (C → S) : rejoindre la partie. Contient le jeton de session s'il existe. Un seul salon par serveur : aucun nom de salon.
-- `welcome` (S → C) : réponse à `join`. Contient le jeton de session (nouveau ou confirmé), le rôle attribué par le serveur et l'état complet.
+- `welcome` (S → C) : réponse à `join`. Contient le jeton de session (nouveau ou confirmé), le rôle attribué par le serveur et l'état de la partie (`state`).
 - `state` (S → C) : état complet de la partie. Envoyé après une reconnexion ou sur demande.
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
@@ -43,16 +43,17 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
   - Si tous les clients sont prêts, la partie peut commencer ou reprendre.
   - Si un client n'est pas joignable, l'écran hôte affiche le joueur déconnecté avec un QR code de reconnexion (vérifié avec le jeton de session).
 - `ready` / `not-ready` (C → S) : le joueur signale qu'il est prêt ou non.
-- `error` (S → C) : erreur. Contient un code et un message.
+- `error` (S → C) : erreur. Contient un code et un message. Un message envoyé dans un état où il n'est pas accepté reçoit le code `wrong-state`.
 
 ### Partie
 
-- `start-game` (C → S, `control`) : lancer la partie.
+- `start-game` (C → S, `control`) : lancer la partie. Refusé (`no-host`) tant qu'aucun écran `host` n'est connecté.
+- `end-game` (C → S, `control`) : terminer la partie manuellement.
 - `game-start` (S → C) : la partie commence. Contient les paramètres de la partie et les règles effectives.
 - `pause` / `resume` (C → S, `control`) : mettre en pause ou reprendre la partie.
-- `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Le motif est `control` ou `technical`, par exemple quand l'écran hôte est déconnecté.
+- `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Motif `control` (commande `pause`) ou `technical` : le dernier écran `host` s'est déconnecté. La partie reprend automatiquement quand un écran `host` se reconnecte. Pendant la pause, les buzz en attente sont annulés, le joueur qui a la main la garde et le chrono s'arrête.
 - `abort` (C → S, `control`) : annuler la partie.
-- `game-end` (S → C) : fin de partie. Contient les résultats, et le motif s'il s'agit d'une annulation.
+- `game-end` (S → C) : fin de partie. Contient `reason` (`ended` ou `aborted`) et `results` : équipes et joueurs sans équipe, triés par score décroissant.
 - `score-adjust` (C → S, `control`) : corriger le score d'un joueur ou d'une équipe. Contient `name` (joueur) ou `team` (équipe) et `delta`.
 - `score-update` (S → C) : nouveau score. Contient `name` (joueur sans équipe) ou `team`, et `score`. Les points d'un joueur en équipe vont à son équipe.
 
@@ -100,7 +101,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `ready` : tous les joueurs sont prêts. La partie peut démarrer.
 - `in-progress` : la partie est en cours et les manches s'enchaînent.
 - `paused` : pause demandée par le maître du jeu. Personne ne peut buzzer ni répondre.
-- `technical-pause` : pause pour raison technique (écran hôte ou joueur déconnecté). Personne ne peut buzzer ni répondre.
+- `technical-pause` : pause pour raison technique (aucun écran hôte connecté). Personne ne peut buzzer ni répondre. La déconnexion d'un joueur ne met pas la partie en pause : il se reconnecte avec son jeton.
 - `game-ended` : la partie est terminée. Les résultats sont affichés.
 - `game-aborted` : la partie a été annulée.
 
