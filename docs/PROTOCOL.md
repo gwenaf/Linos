@@ -5,16 +5,19 @@
 - Une seule connexion WebSocket par client, sur `/ws`.
 - Chaque message est un objet JSON : `{ "type": "buzz", "data": { ... } }`. `data` est omis quand il n'y a rien à transmettre.
 - Le serveur fait autorité : il tient l'état, les chronos, les règles et les scores. Les clients ne font qu'afficher et envoyer des intentions.
-- Le serveur identifie toujours l'émetteur par sa connexion et son jeton de session, jamais par un pseudonyme fourni dans le message. Le rôle est lié au jeton.
+- Le serveur identifie toujours l'émetteur par sa connexion et son jeton de session, jamais par un pseudonyme fourni dans le message. Le rôle est attribué par le serveur, jamais déclaré par le client.
 - Le serveur horodate à la réception les messages `buzz` et `answer`. Les points de rapidité sont calculés avec cet horodatage.
 - Le chrono d'une piste démarre quand l'écran hôte envoie `media-started`, et non à l'envoi de `track-start`. Le temps de chargement du média ne pénalise donc personne.
 - Reconnexion : le client renvoie `join` avec son jeton, puis le serveur répond `state` avec l'état complet de la partie.
 
-## Rôles
+## Pages et rôles
 
-- `host` : écran principal (TV). Il joue les médias et affiche la partie, sans aucune autorité de validation.
-- `master` : maître du jeu. Il valide les réponses et pilote la partie (pause, passer une piste, corriger un score). Il n'existe qu'en contrôle `master`. Il peut utiliser le même appareil que `host`.
-- `player` : joueur sur téléphone. Il buzze, répond, choisit un thème, utilise un joker et mise.
+Le binaire sert trois pages. Le rôle d'une connexion découle de la page et de sa provenance : le serveur refuse ainsi un `validate` envoyé depuis un téléphone.
+
+- `/control` → rôle `control` : page principale, ouverte sur le PC hôte. L'hôte y dirige la partie (configuration, lancement, pause, piste suivante), voit les réponses des joueurs, valide, affiche les indices et corrige les scores. Un bouton ouvre `/host` dans une nouvelle fenêtre. En validation `auto`, `control` dirige toujours la partie mais ne valide pas.
+- `/host` → rôle `host` : affichage du jeu (TV ou second écran). Joue les médias et affiche la partie, sans aucune autorité.
+- `/play` → rôle `player` : joueur sur téléphone. Il buzze, répond, choisit un thème, utilise un joker et mise.
+- Les rôles `control` et `host` ne sont accordés qu'aux connexions provenant de la machine hôte (adresse de bouclage). Toute autre connexion est `player`.
 - En partie par équipes, les points sont comptés par équipe. Un buzz ou une réponse d'un membre engage toute l'équipe.
 
 ## Messages
@@ -23,8 +26,8 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 ### Connexion et lobby
 
-- `join` (C → S) : rejoindre un salon. Contient le nom du salon et le jeton de session s'il existe.
-- `welcome` (S → C) : réponse à `join`. Contient le jeton de session (nouveau ou confirmé), le rôle et l'état complet.
+- `join` (C → S) : rejoindre la partie. Contient le jeton de session s'il existe. Un seul salon par serveur : aucun nom de salon.
+- `welcome` (S → C) : réponse à `join`. Contient le jeton de session (nouveau ou confirmé), le rôle attribué par le serveur et l'état complet.
 - `state` (S → C) : état complet de la partie. Envoyé après une reconnexion ou sur demande.
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
@@ -32,8 +35,8 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `assign-team` (S → C) : un joueur est assigné à une équipe. Contient le nom de l'équipe et le pseudonyme du joueur.
 - `list-teams` (S → C) : liste des équipes du salon.
 - `lobby-update` (S → C) : joueurs, équipes et statut prêt/pas prêt.
-- `configure` (C → S, `master` ou `host`) : choisir le pack, le contrôle (`master` ou `auto`) et les règles modifiées pour cette partie.
-- `kick` (C → S, `master`) : demander l'expulsion d'un joueur.
+- `configure` (C → S, `control`) : choisir le pack, la validation (`master` : par la page `control`, ou `auto`) et les règles modifiées pour cette partie.
+- `kick` (C → S, `control`) : demander l'expulsion d'un joueur.
 - `kicked` (S → C) : un joueur a été expulsé.
 - `auto-ready-check` (S → C) : le serveur vérifie que tous les clients sont prêts à commencer ou continuer.
   - Un client qui n'est pas prêt répond `not-ready`.
@@ -44,13 +47,13 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 ### Partie
 
-- `start-game` (C → S, `master`, ou `host` en contrôle `auto`) : lancer la partie.
+- `start-game` (C → S, `control`) : lancer la partie.
 - `game-start` (S → C) : la partie commence. Contient les paramètres de la partie et les règles effectives.
-- `pause` / `resume` (C → S, `master`) : mettre en pause ou reprendre la partie.
-- `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Le motif est `master` ou `technical`, par exemple quand l'écran hôte est déconnecté.
-- `abort` (C → S, `master`) : annuler la partie.
+- `pause` / `resume` (C → S, `control`) : mettre en pause ou reprendre la partie.
+- `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Le motif est `control` ou `technical`, par exemple quand l'écran hôte est déconnecté.
+- `abort` (C → S, `control`) : annuler la partie.
 - `game-end` (S → C) : fin de partie. Contient les résultats, et le motif s'il s'agit d'une annulation.
-- `score-adjust` (C → S, `master`) : corriger le score d'un joueur ou d'une équipe. Contient la cible et le delta de points.
+- `score-adjust` (C → S, `control`) : corriger le score d'un joueur ou d'une équipe. Contient la cible et le delta de points.
 - `score-update` (S → C) : nouveau score d'un joueur ou d'une équipe.
 
 ### Manche
@@ -74,17 +77,19 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `media-started` (C → S, `host`) : la lecture a réellement commencé. Le chrono démarre.
 - `timer-start` (S → C) : chrono lancé. Contient la durée et l'éventuelle avance du propriétaire du thème.
 - `reveal` (S → C, `host`) : étape de dévoilement (son, image, flou).
-- `hint` (S → C) : indice à afficher.
+- `hint` (S → C) : indice à afficher, déclenché par le chrono (manifest) ou par `show-hint`.
+- `show-hint` (C → S, `control`) : afficher un indice immédiatement.
 - `choices` (S → C) : réponses proposées pour un élément de type `choice`.
 - `buzz-available` (S → C) : le buzz est ouvert pour le destinataire, par exemple à la fin de l'avance du propriétaire ou après un blocage.
 - `buzz` (C → S) : le joueur buzze. Aucune donnée : le serveur identifie le joueur via sa session.
 - `buzz-accepted` (S → C) : un joueur a la main. Contient le pseudonyme et le temps imparti pour répondre. Si `pauseOnBuzz` est actif, le média et le chrono sont mis en pause.
 - `buzz-blocked` (S → C) : le buzz est fermé pour le destinataire.
 - `answer` (C → S) : réponse à un élément. Contient le libellé de l'élément et la valeur. Le serveur identifie le joueur via sa session.
-- `validate` (C → S, `master`) : validation d'une réponse orale ou tapée. Contient le libellé de l'élément et `correct` (vrai ou faux).
+- `answer-submitted` (S → C, `control`) : réponse reçue d'un joueur. Contient le pseudonyme, l'élément, la valeur et, en validation `auto`, le verdict calculé.
+- `validate` (C → S, `control`) : validation d'une réponse orale ou tapée. Contient le libellé de l'élément et `correct` (vrai ou faux).
 - `answer-result` (S → C) : résultat d'une réponse. Contient le pseudonyme, l'élément, correct ou incorrect, et les points gagnés ou perdus.
 - `lockout` (S → C) : un joueur est bloqué après une mauvaise réponse. Contient le pseudonyme et la durée.
-- `skip` (C → S, `master`) : passer la piste.
+- `skip` (C → S, `control`) : passer la piste.
 - `track-end` (S → C) : fin de la piste. Contient les bonnes réponses et les points attribués.
 
 ## États

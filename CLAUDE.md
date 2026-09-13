@@ -1,6 +1,6 @@
 # Linos
 
-Blind test open-source, portable, hors ligne. Un binaire Go unique sert l'écran hôte (`/host`, TV) et les manettes joueurs (`/play`, mobile, rejointes via QR code). Specs complètes : `docs/SPECS.md`.
+Blind test open-source, portable, hors ligne. Un binaire Go unique sert la page de pilotage (`/control`, PC hôte), l'affichage du jeu (`/host`, TV) et les manettes joueurs (`/play`, mobile, rejointes via QR code). Specs complètes : `docs/SPECS.md`.
 
 ## Stack
 
@@ -22,7 +22,8 @@ internal/mdns/      annonce blindtest.local
 internal/pack/      gamepacks (manifest.json + médias locaux)
 internal/tags/      lecture tags ID3 à l'import
 web/                front Vite ; web/embed.go expose web/dist au binaire
-web/src/host/       écran hôte
+web/src/control/    pilotage de la partie (PC hôte)
+web/src/host/       affichage du jeu (TV)
 web/src/play/       manette mobile
 docs/               specs
 ```

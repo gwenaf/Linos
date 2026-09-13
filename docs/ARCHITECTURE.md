@@ -82,7 +82,8 @@ Exemples :
 ## 4. Front
 
 - **Preact** avec **`@preact/signals`**, build Vite, embarqué dans le binaire via `embed`.
-- Deux routes : `/host` (TV) et `/play` (mobile).
+- Trois routes : `/control` (pilotage, PC hôte), `/host` (affichage, TV) et `/play` (mobile).
+- Rôles `control` et `host` réservés aux connexions depuis l'adresse de bouclage ; toute autre connexion est `player`.
 
 ## 5. Réseau, QR code et sessions
 
@@ -114,7 +115,7 @@ macOS affiche une demande similaire, répétée à chaque version pour une appli
 
 ### Docker
 
-Image destinée aux utilisateurs avancés qui installent Linos sur leur serveur. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur.
+Image destinée aux utilisateurs avancés qui installent Linos sur leur serveur. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur. `/control` et `/host` n'étant accordés qu'en bouclage, un accès distant à ces pages demandera un mécanisme dédié (non prévu en v1).
 
 ## 6. Points de vigilance
 
