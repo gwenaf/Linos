@@ -11,6 +11,6 @@ func New() http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /ws", ws.Handler)
+	mux.Handle("GET /ws", ws.NewRoom())
 	return mux
 }
