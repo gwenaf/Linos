@@ -256,3 +256,16 @@ small {
   gap: 0.5rem;
   align-items: center;
 }
+
+.help {
+  border-top: 1px solid #2c3240;
+  margin-top: 1rem;
+}
+
+.help li {
+  margin-block: 0.5rem;
+}
+
+.help code {
+  word-break: break-all;
+}

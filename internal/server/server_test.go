@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -16,6 +18,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/gwenaf/linos/internal/game"
+	"github.com/gwenaf/linos/internal/network"
 )
 
 var web = fstest.MapFS{
@@ -142,5 +145,39 @@ func TestWebSocketThroughRequestLog(t *testing.T) {
 	var m game.Message
 	if err := wsjson.Read(ctx, c, &m); err != nil || m.Type != "welcome" {
 		t.Fatalf("read = %v %v, want welcome", m, err)
+	}
+}
+
+func TestNetworkHelpers(t *testing.T) {
+	prev := network.Command
+	t.Cleanup(func() { network.Command = prev })
+	var fail error
+	network.Command = func(string, ...string) ([]byte, error) { return []byte("Public"), fail }
+	h := New(game.NewRoom(t.TempDir()), web)
+
+	check(t, h, []request{{"network info", "/api/network", local, http.StatusOK, `"hotspot":"192.168.137."`}})
+
+	firewall := func(remote, origin string) int {
+		req := httptest.NewRequest("POST", "/api/firewall", nil)
+		req.RemoteAddr, req.Host = remote, "localhost:7777"
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := firewall(phone, ""); code != http.StatusForbidden {
+		t.Errorf("from phone: %d, want 403", code)
+	}
+	if code := firewall(local, "http://evil.example"); code != http.StatusForbidden {
+		t.Errorf("cross-origin: %d, want 403", code)
+	}
+	if code := firewall(local, "http://localhost:7777"); code != http.StatusNoContent && runtime.GOOS == "windows" {
+		t.Errorf("same origin: %d, want 204", code)
+	}
+	fail = errors.New("UAC refused")
+	if code := firewall(local, ""); code != http.StatusInternalServerError {
+		t.Errorf("refused prompt: %d, want 500", code)
 	}
 }

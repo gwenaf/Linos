@@ -3,8 +3,10 @@ package server
 import (
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -58,6 +60,31 @@ func New(room *game.Room, web fs.FS) http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string][]string{"urls": urls})
+	}))
+
+	mux.HandleFunc("GET /api/network", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"categories": network.Categories(),
+			"addresses":  network.LocalIPs(),
+			"hotspot":    network.HotspotPrefix,
+		})
+	}))
+
+	mux.HandleFunc("POST /api/firewall", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		// Refuse cross-site posts: a web page open on the PC must not trigger the UAC prompt.
+		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+			return
+		}
+		exe, _ := os.Executable() // cannot fail on Windows, the only platform AllowFirewall acts on
+		if err := network.AllowFirewall(exe); err != nil {
+			slog.Warn("firewall rule not added", "error", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		slog.Info("firewall rule added", "program", exe)
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	mux.HandleFunc("POST /api/log", frontError)

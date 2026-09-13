@@ -30,10 +30,27 @@ const results = signal<Data>(null)
 const joinUrls = signal<string[]>([])
 const inviteUrl = signal('')
 
+const network = signal<Data>(null)
+const showHelp = signal(false)
+const firewallResult = signal('')
+
 if (isLocalPage) {
   fetch('/api/join')
     .then((r) => r.json())
     .then((d) => (joinUrls.value = d.urls))
+  fetch('/api/network')
+    .then((r) => r.json())
+    .then((d) => (network.value = d))
+  // Nobody joined after 30 s: the phones probably cannot reach the PC.
+  setTimeout(() => {
+    if (lobby.value.players.length === 0) showHelp.value = true
+  }, 30_000)
+}
+
+async function allowFirewall() {
+  firewallResult.value = 'Acceptez la demande de Windows sur ce PC…'
+  const res = await fetch('/api/firewall', { method: 'POST' })
+  firewallResult.value = res.ok ? 'Règle ajoutée : réessayez depuis un téléphone.' : `Échec : ${await res.text()}`
 }
 
 conn.on('welcome', (d) => {
@@ -132,12 +149,27 @@ function Lobby() {
       {isLocalPage && (
         <section>
           <h2>Rejoindre</h2>
+          {network.value?.categories?.includes('Public') && (
+            <p class="warning">
+              Ce réseau est classé « Public » : Windows peut bloquer les téléphones. <button onClick={allowFirewall}>Autoriser Linos dans le pare-feu</button>
+            </p>
+          )}
           {joinUrls.value.length > 0 ? (
             <Qr url={joinUrls.value[0]} caption="Les joueurs scannent ce code, sur le même Wi-Fi" />
           ) : (
             <p>Aucune adresse réseau locale trouvée : vérifiez la connexion Wi-Fi.</p>
           )}
-          {joinUrls.value.length > 1 && <p>Autres adresses : {joinUrls.value.slice(1).join(', ')}</p>}
+          <ul>
+            {joinUrls.value.map((url) => (
+              <li key={url}>
+                <code>{url}</code>
+                {network.value && url.includes(`//${network.value.hotspot}`) && <small>Point d'accès Windows : 8 appareils maximum par défaut</small>}
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => (showHelp.value = !showHelp.value)}>Les téléphones n'arrivent pas à se connecter ?</button>
+          {firewallResult.value && <p>{firewallResult.value}</p>}
+          {showHelp.value && <NetworkHelp />}
         </section>
       )}
       <section>
@@ -182,6 +214,38 @@ function Lobby() {
         {configured.value && state.value !== 'ready' && <small>Tous les joueurs connectés doivent être prêts.</small>}
       </section>
     </>
+  )
+}
+
+function NetworkHelp() {
+  const health = joinUrls.value[0]?.replace(/\/play$/, '/health')
+  return (
+    <div class="help">
+      <h3>Aucun téléphone ne se connecte ?</h3>
+      <ol>
+        <li>
+          Sur un téléphone, ouvrez <code>{health}</code> dans le navigateur. Rien ne s'affiche : le téléphone n'atteint pas ce PC, continuez.
+        </li>
+        <li>Vérifiez que le téléphone est sur le même Wi-Fi que ce PC, pas en 4G ni sur un réseau invité, sans VPN.</li>
+        <li>
+          Sur iPhone, un navigateur autre que Safari doit avoir l'autorisation « Réseau local » (Réglages › Confidentialité et sécurité › Réseau local).
+        </li>
+        <li>
+          Autorisez Linos dans le pare-feu : <button onClick={allowFirewall}>Autoriser</button>
+        </li>
+        <li>
+          Beaucoup de box et de Wi-Fi publics isolent les appareils entre eux. Solutions :
+          <ul>
+            <li>
+              Activez le point d'accès mobile de Windows (Paramètres › Réseau et Internet), connectez les téléphones dessus et relancez Linos. Limité à 8
+              appareils ; au-delà, valeur <code>WifiMaxPeers</code> (jusqu'à 128) dans le registre <code>HKLM\SYSTEM\CurrentControlSet\Services\icssvc\Settings</code>, puis redémarrage.
+            </li>
+            <li>Désactivez l'isolation des clients ou le mode invité dans les réglages Wi-Fi de la box.</li>
+            <li>Pour jouer partout à 30 ou plus : un mini-routeur de voyage, sans isolation, auquel le PC et les téléphones se connectent.</li>
+          </ul>
+        </li>
+      </ol>
+    </div>
   )
 }
 

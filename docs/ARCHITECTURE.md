@@ -115,9 +115,15 @@ Au premier lancement, Windows demande l'autorisation d'accès réseau pour l'ex�
 
 v1 :
 
-1. **Profil réseau** : lecture via `Get-NetConnectionProfile` (sans droits admin). Profil « public » : avertissement sur l'écran hôte avec la marche à suivre.
-2. **Aucun joueur après 30 s** : aide affichée sur l'écran hôte (pare-feu, même réseau Wi-Fi, isolation des clients sur les réseaux invités).
-3. **Bouton « Autoriser dans le pare-feu »** : ajoute une règle entrante pour l'exécutable (`netsh advfirewall firewall add rule … program=<chemin>`) via une élévation UAC.
+1. **Profil réseau** : `GET /api/network` lit `Get-NetConnectionProfile` (sans droits admin). Profil « Public » : avertissement dans `/control`.
+2. **Aucun joueur après 30 s** : aide affichée dans `/control` (test `/health` depuis le téléphone, même Wi-Fi, autorisation « Réseau local » des navigateurs iOS autres que Safari, pare-feu, isolation des clients). Aussi accessible par un bouton.
+3. **Bouton « Autoriser Linos dans le pare-feu »** : `POST /api/firewall` (PC hôte uniquement, requête d'une autre origine refusée) lance `netsh advfirewall firewall add rule … program=<chemin>` via une élévation UAC.
+
+**Isolation des clients** (constatée sur une Bbox : le PC ne résout même pas l'adresse MAC du téléphone) : fréquente sur les box et quasi systématique sur les Wi-Fi publics. Contournements proposés par l'aide :
+
+- point d'accès mobile Windows : l'adresse `192.168.137.1` est détectée et signalée dans `/control`. Limité à 8 clients par défaut ; la valeur DWORD `WifiMaxPeers` (jusqu'à 128) dans `HKLM\SYSTEM\CurrentControlSet\Services\icssvc\Settings` relève la limite (non documenté par Microsoft, redémarrage requis) ;
+- désactivation de l'isolation ou du mode invité sur la box ;
+- mini-routeur de voyage sans isolation, recommandé pour jouer à 30 ou plus hors de chez soi.
 
 macOS affiche une demande similaire, répétée à chaque version pour une application non signée. Linux n'a généralement pas de pare-feu actif par défaut.
 
