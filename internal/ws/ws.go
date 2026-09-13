@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	mrand "math/rand/v2"
 	"net"
 	"net/http"
@@ -22,6 +23,13 @@ const (
 	maxNameLen = 32
 )
 
+// Manifest defaults until pack rules are loaded.
+var scoring = struct {
+	max, min     int
+	duration     time.Duration
+	wrongPenalty int
+}{max: 100, min: 20, duration: 30 * time.Second}
+
 const (
 	roleControl = "control"
 	roleHost    = "host"
@@ -29,10 +37,11 @@ const (
 )
 
 var requiredRole = map[string]string{
-	"identify": rolePlayer,
-	"buzz":     rolePlayer,
-	"validate": roleControl,
-	"skip":     roleControl,
+	"identify":     rolePlayer,
+	"buzz":         rolePlayer,
+	"validate":     roleControl,
+	"skip":         roleControl,
+	"score-adjust": roleControl,
 }
 
 type Message struct {
@@ -59,6 +68,7 @@ type conn struct {
 type player struct {
 	token string
 	name  string
+	score int
 	conn  *conn
 }
 
@@ -90,17 +100,23 @@ type Room struct {
 	firstBuzz  time.Time
 	holder     *player
 	attempted  map[*player]bool
+
+	trackStart    time.Time
+	paused        time.Duration
+	pausedAt      time.Time
+	holderElapsed time.Duration
 	// turn invalidates pending timers whenever the buzz state moves on.
 	turn int
 }
 
 func NewRoom() *Room {
 	r := &Room{
-		events:    make(chan event, 64),
-		conns:     map[*conn]struct{}{},
-		players:   map[string]*player{},
-		buzzOpen:  true,
-		attempted: map[*player]bool{},
+		events:     make(chan event, 64),
+		conns:      map[*conn]struct{}{},
+		players:    map[string]*player{},
+		buzzOpen:   true,
+		attempted:  map[*player]bool{},
+		trackStart: time.Now(),
 	}
 	go r.run()
 	return r
@@ -269,7 +285,25 @@ func (r *Room) handleMessage(e event) {
 		r.candidates = nil
 		r.attempted = map[*player]bool{}
 		r.turn++
+		r.trackStart = time.Now()
+		r.paused = 0
 		r.openBuzz()
+
+	case "score-adjust":
+		var d struct {
+			Name  string `json:"name"`
+			Delta int    `json:"delta"`
+		}
+		if !r.decode(c, e.msg, &d) {
+			return
+		}
+		p := r.playerByName(d.Name)
+		if p == nil {
+			r.sendError(c, "unknown-player", "no player named "+d.Name)
+			return
+		}
+		p.score += d.Delta
+		r.broadcastScore(p)
 
 	default:
 		r.sendError(c, "unknown-type", "unknown message type")
@@ -309,6 +343,9 @@ func (r *Room) closeBuzzWindow() {
 	r.holder = winner
 	r.attempted[winner] = true
 	r.turn++
+	// Candidates tied inside the window share the first buzz time; the clock pauses while the holder answers.
+	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
+	r.pausedAt = time.Now()
 
 	r.broadcast(newMessage("buzz-accepted", map[string]any{
 		"name":       winner.name,
@@ -325,13 +362,42 @@ func (r *Room) closeBuzzWindow() {
 }
 
 func (r *Room) resolveAnswer(correct bool) {
-	name := r.holder.name
+	p := r.holder
 	r.holder = nil
 	r.turn++
-	r.broadcast(newMessage("answer-result", map[string]any{"name": name, "correct": correct}))
+	r.paused += time.Since(r.pausedAt)
+
+	points := -scoring.wrongPenalty
+	if correct {
+		points = speedPoints(scoring.max, scoring.min, scoring.duration, r.holderElapsed)
+	}
+	p.score += points
+	r.broadcast(newMessage("answer-result", map[string]any{"name": p.name, "correct": correct, "points": points}))
+	if points != 0 {
+		r.broadcastScore(p)
+	}
 	if !correct {
 		r.openBuzz()
 	}
+}
+
+// speedPoints decreases linearly from hi at 0 to lo at duration, then stays at lo.
+func speedPoints(hi, lo int, duration, elapsed time.Duration) int {
+	f := min(max(float64(elapsed)/float64(duration), 0), 1)
+	return hi - int(math.Round(float64(hi-lo)*f))
+}
+
+func (r *Room) broadcastScore(p *player) {
+	r.broadcast(newMessage("score-update", map[string]any{"name": p.name, "score": p.score}))
+}
+
+func (r *Room) playerByName(name string) *player {
+	for _, p := range r.players {
+		if p.name != "" && p.name == name {
+			return p
+		}
+	}
+	return nil
 }
 
 func (r *Room) openBuzz() {

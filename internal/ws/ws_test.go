@@ -67,6 +67,12 @@ func joinPlayer(t *testing.T, ctx context.Context, url, name string) *websocket.
 type answerResult struct {
 	Name    string `json:"name"`
 	Correct bool   `json:"correct"`
+	Points  int    `json:"points"`
+}
+
+type scoreUpdate struct {
+	Name  string `json:"name"`
+	Score int    `json:"score"`
 }
 
 func TestValidate(t *testing.T) {
@@ -99,7 +105,7 @@ func TestValidate(t *testing.T) {
 	write(t, ctx, ctrl, "validate", map[string]bool{"correct": false})
 	var res answerResult
 	readUntil(t, ctx, ctrl, "answer-result", &res)
-	if res != (answerResult{"alice", false}) {
+	if res != (answerResult{"alice", false, 0}) {
 		t.Fatalf("result = %+v, want alice wrong", res)
 	}
 	readUntil(t, ctx, ctrl, "buzz-available", nil)
@@ -117,8 +123,37 @@ func TestValidate(t *testing.T) {
 
 	write(t, ctx, ctrl, "validate", map[string]bool{"correct": true})
 	readUntil(t, ctx, ctrl, "answer-result", &res)
-	if res != (answerResult{"bob", true}) {
-		t.Fatalf("result = %+v, want bob correct", res)
+	if res.Name != "bob" || !res.Correct || res.Points < 95 || res.Points > 100 {
+		t.Fatalf("result = %+v, want bob correct with ~100 points", res)
+	}
+	var score scoreUpdate
+	readUntil(t, ctx, ctrl, "score-update", &score)
+	if score != (scoreUpdate{"bob", res.Points}) {
+		t.Fatalf("score = %+v, want bob %d", score, res.Points)
+	}
+
+	write(t, ctx, ctrl, "score-adjust", map[string]any{"name": "bob", "delta": -10})
+	readUntil(t, ctx, ctrl, "score-update", &score)
+	if score != (scoreUpdate{"bob", res.Points - 10}) {
+		t.Fatalf("adjusted score = %+v, want bob %d", score, res.Points-10)
+	}
+}
+
+func TestSpeedPoints(t *testing.T) {
+	cases := []struct {
+		elapsed time.Duration
+		want    int
+	}{
+		{0, 100},
+		{15 * time.Second, 60},
+		{30 * time.Second, 20},
+		{45 * time.Second, 20},
+		{-time.Second, 100},
+	}
+	for _, tc := range cases {
+		if got := speedPoints(100, 20, 30*time.Second, tc.elapsed); got != tc.want {
+			t.Errorf("speedPoints(%v) = %d, want %d", tc.elapsed, got, tc.want)
+		}
 	}
 }
 
