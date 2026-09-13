@@ -64,7 +64,8 @@ Exemples :
   - valeurs énumérées (modes, types, sélections) et bornes (`min` ≤ `max`, `fuzziness` entre 0 et 1) contrôlées ;
   - toutes les erreurs sont renvoyées en une fois, préfixées par leur chemin (`tracks[2].guesses[0].answer`).
 - Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
-- Import de mp3 par glisser-déposer : manifest généré en mémoire, aucun fichier créé.
+- Import rapide (`/control`, PC hôte) : glisser-déposer d'un dossier ou de fichiers audio (mp3, m4a, aac, ogg, opus, flac, wav), envoyés à `POST /api/import` (PC hôte, même origine) et enregistrés dans un nouveau pack dossier `packs/import-<date>/`. Le `manifest.json` est généré depuis les tags (`dhowden/tag`) ou, à défaut, le nom « Artiste - Titre » (numéro de piste retiré) : éléments « Artiste » et « Titre », réponses acceptées avec et sans les extras (« (Remastered) », « feat. »). Options : début et durée des extraits, réponses sur téléphone en contrôle `auto`. Le pack importé reste réutilisable et modifiable ; un import sans fichier audio ne laisse rien.
+- `duration` d'une piste prime sur la durée des règles.
 - Déroulé : à `start-game`, les manches sont aplaties en liste de pistes (`sequence` dans l'ordre, `random` tiré parmi les thèmes sans rejouer une piste). Règles effectives d'une piste : valeurs par défaut, puis règles du pack, puis de la manche, puis barème de l'élément deviné.
 - Avant chaque piste, le serveur enchaîne : choix du thème (manches `theme-pick`, pistes tirées au moment du choix), puis mises (barème `wager`), puis la piste. `skip` abandonne ces étapes.
 - Un seul calcul de points pour le buzz et les réponses simultanées : barème (rapidité, fixe, rang, mise), bonus `othersBonus` pour une autre équipe que le propriétaire du thème, puis joker double sur les points positifs.

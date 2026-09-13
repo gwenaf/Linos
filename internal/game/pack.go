@@ -23,6 +23,9 @@ type loadedPack struct {
 	media map[string]bool
 }
 
+// PacksDir is the folder the room lists and loads packs from.
+func (r *Room) PacksDir() string { return r.packsDir }
+
 // Media opens a media file of the configured pack. Safe to call from any goroutine.
 func (r *Room) Media(name string) (io.ReadSeekCloser, error) {
 	lp := r.loaded.Load()

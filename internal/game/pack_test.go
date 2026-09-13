@@ -82,7 +82,11 @@ func TestListPacks(t *testing.T) {
 		t.Errorf("later = %+v, want its title and the impossible combination", later)
 	}
 
-	empty := NewRoom(filepath.Join(t.TempDir(), "missing"))
+	missing := filepath.Join(t.TempDir(), "missing")
+	empty := NewRoom(missing)
+	if empty.PacksDir() != missing {
+		t.Fatalf("PacksDir = %q, want %q", empty.PacksDir(), missing)
+	}
 	ctrl2 := newControl(t, empty)
 	send(empty, ctrl2, "list-packs", nil)
 	expect(t, ctrl2, "packs", &got)

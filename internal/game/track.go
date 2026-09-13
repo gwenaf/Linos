@@ -234,6 +234,9 @@ func (r *Room) startTrack() {
 	r.newGuessCycle()
 	r.paused, r.clockStops = 0, 0
 	r.headStartOver = r.owner == nil || r.rules.headStart == 0
+	if d := r.track().Duration; d > 0 {
+		r.rules.duration = seconds(d)
+	}
 	r.sendTrackStart()
 }
 
@@ -261,7 +264,7 @@ func (r *Room) trackPayload(role string) map[string]any {
 		"index":       r.current,
 		"total":       len(r.playlist),
 		"round":       it.round,
-		"duration":    it.rules.duration.Seconds(),
+		"duration":    r.rules.duration.Seconds(),
 		"guesses":     guesses,
 		"mode":        it.rules.mode,
 		"via":         it.rules.via,

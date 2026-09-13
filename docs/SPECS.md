@@ -40,7 +40,7 @@ Seule la génération de l'URL du QR code change entre les deux. Tous les joueur
 
 - Le jeu lit uniquement des fichiers locaux, regroupés dans un **gamepack** `.linospack` (archive ZIP) : un `manifest.json` et les médias (audio, vidéo, image), rangés dans le dossier `packs/` à côté de l'exécutable. Un dossier non zippé au même contenu est aussi accepté (forme d'édition). Exemple de manifest : `docs/manifest.example.json`
 - Un gamepack décrit des pistes, des thèmes et des manches (thèmes et manches facultatifs), ainsi que les règles par défaut
-- Import par glisser-déposer d'un dossier de mp3, lecture automatique des tags
+- Import rapide par glisser-déposer d'un dossier de fichiers audio dans `/control` : pack généré dans `packs/` depuis les tags, jouable aussitôt
 - Aucune plateforme de streaming dans le jeu : leurs conditions interdisent l'usage en jeu ou quiz (Spotify, Apple, SoundCloud)
 - Création de gamepacks : builder dans un projet séparé, avec import de playlists. Contrat commun : JSON Schema du manifest, publié dans ce dépôt
 

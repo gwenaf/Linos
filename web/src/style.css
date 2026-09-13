@@ -291,3 +291,18 @@ small {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+.dropzone {
+  border: 2px dashed #3a4150;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-block: 1rem;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+}
+
+.dropzone input[type='number'] {
+  width: 6rem;
+}

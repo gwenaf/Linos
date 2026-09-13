@@ -20,7 +20,7 @@ internal/ws/        transport WebSocket : rôles, lecture/écriture vers game.Ro
 internal/network/   adresses IP locales pour le QR code ; pare-feu à venir
 internal/mdns/      annonce blindtest.local
 internal/pack/      gamepacks (manifest.json + médias locaux), validation
-internal/tags/      lecture tags ID3 à l'import
+internal/tags/      import rapide : fichiers audio envoyés, tags lus, pack dossier généré
 web/                front Vite ; web/embed.go embarque web/dist dans le binaire
 web/src/ws.ts       connexion WebSocket commune (reconnexion, jetons)
 web/src/control.tsx pilotage de la partie (PC hôte ou téléphone maître du jeu)

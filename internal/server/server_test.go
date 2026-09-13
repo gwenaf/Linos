@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -179,5 +181,58 @@ func TestNetworkHelpers(t *testing.T) {
 	fail = errors.New("UAC refused")
 	if code := firewall(local, ""); code != http.StatusInternalServerError {
 		t.Errorf("refused prompt: %d, want 500", code)
+	}
+}
+
+func TestImport(t *testing.T) {
+	room := game.NewRoom(t.TempDir())
+	h := New(room, web)
+	post := func(remote, origin, contentType string, body *bytes.Buffer) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/api/import?start=10&duration=20&via=device", body)
+		req.RemoteAddr, req.Host = remote, "localhost:7777"
+		req.Header.Set("Content-Type", contentType)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	upload := func(name string) (*bytes.Buffer, string) {
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		part, _ := w.CreateFormFile("files", name)
+		part.Write([]byte("audio"))
+		w.Close()
+		return &buf, w.FormDataContentType()
+	}
+
+	buf, ct := upload("Artist - Song.mp3")
+	rec := post(local, "http://localhost:7777", ct, buf)
+	var res struct {
+		Pack   string
+		Tracks int
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil || rec.Code != http.StatusOK || res.Tracks != 1 {
+		t.Fatalf("import = %d %s", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(filepath.Join(room.PacksDir(), res.Pack, "manifest.json")); err != nil {
+		t.Fatalf("imported pack not written: %v", err)
+	}
+
+	buf, ct = upload("song.mp3")
+	if rec := post(phone, "", ct, buf); rec.Code != http.StatusForbidden {
+		t.Errorf("from a phone: %d, want 403", rec.Code)
+	}
+	buf, ct = upload("song.mp3")
+	if rec := post(local, "http://evil.example", ct, buf); rec.Code != http.StatusForbidden {
+		t.Errorf("cross-origin: %d, want 403", rec.Code)
+	}
+	if rec := post(local, "", "text/plain", bytes.NewBufferString("x")); rec.Code != http.StatusBadRequest {
+		t.Errorf("not multipart: %d, want 400", rec.Code)
+	}
+	buf, ct = upload("notes.txt")
+	if rec := post(local, "", ct, buf); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no audio file") {
+		t.Errorf("no audio: %d %s, want 400", rec.Code, rec.Body)
 	}
 }

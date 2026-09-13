@@ -6,81 +6,81 @@ const SupportedVersion = 1
 type Manifest struct {
 	Version  int     `json:"version"`
 	Title    string  `json:"title"`
-	Author   string  `json:"author"`
-	Language string  `json:"language"`
-	Cover    string  `json:"cover"`
-	Game     Game    `json:"game"`
-	Rules    *Rules  `json:"rules"`
-	Themes   []Theme `json:"themes"`
+	Author   string  `json:"author,omitempty"`
+	Language string  `json:"language,omitempty"`
+	Cover    string  `json:"cover,omitempty"`
+	Game     Game    `json:"game,omitzero"`
+	Rules    *Rules  `json:"rules,omitempty"`
+	Themes   []Theme `json:"themes,omitempty"`
 	Tracks   []Track `json:"tracks"`
-	Rounds   []Round `json:"rounds"`
+	Rounds   []Round `json:"rounds,omitempty"`
 }
 
 type Game struct {
-	Control  Control  `json:"control"`
-	Players  Players  `json:"players"`
-	End      End      `json:"end"`
-	Tiebreak Tiebreak `json:"tiebreak"`
+	Control  Control  `json:"control,omitzero"`
+	Players  Players  `json:"players,omitzero"`
+	End      End      `json:"end,omitzero"`
+	Tiebreak Tiebreak `json:"tiebreak,omitzero"`
 }
 
 type Control struct {
-	Allowed []string `json:"allowed"`
-	Default string   `json:"default"`
+	Allowed []string `json:"allowed,omitempty"`
+	Default string   `json:"default,omitempty"`
 }
 
 type Players struct {
-	Teams    string `json:"teams"`
-	MinTeams int    `json:"minTeams"`
-	MaxTeams int    `json:"maxTeams"`
+	Teams    string `json:"teams,omitempty"`
+	MinTeams int    `json:"minTeams,omitempty"`
+	MaxTeams int    `json:"maxTeams,omitempty"`
 }
 
 type End struct {
-	Type   string `json:"type"`
-	Target int    `json:"target"`
+	Type   string `json:"type,omitempty"`
+	Target int    `json:"target,omitempty"`
 }
 
 type Tiebreak struct {
-	Type   string   `json:"type"`
-	Themes []string `json:"themes"`
+	Type   string   `json:"type,omitempty"`
+	Themes []string `json:"themes,omitempty"`
 }
 
 // Rules fields are pointers so a round can override only what it sets.
 type Rules struct {
-	Duration *float64     `json:"duration"`
-	Answer   *AnswerRules `json:"answer"`
-	Owner    *OwnerRules  `json:"owner"`
-	Scoring  *Scoring     `json:"scoring"`
-	Jokers   *Jokers      `json:"jokers"`
+	Duration *float64     `json:"duration,omitempty"`
+	Answer   *AnswerRules `json:"answer,omitempty"`
+	Owner    *OwnerRules  `json:"owner,omitempty"`
+	Scoring  *Scoring     `json:"scoring,omitempty"`
+	Jokers   *Jokers      `json:"jokers,omitempty"`
 }
 
 type AnswerRules struct {
-	Mode         *string  `json:"mode"`
-	Via          *string  `json:"via"`
-	AnswerTime   *float64 `json:"answerTime"`
-	PauseOnBuzz  *bool    `json:"pauseOnBuzz"`
-	Attempts     *int     `json:"attempts"`
-	WrongLockout *float64 `json:"wrongLockout"`
-	Rebound      *string  `json:"rebound"`
-	Fuzziness    *float64 `json:"fuzziness"`
+	Mode         *string  `json:"mode,omitempty"`
+	Via          *string  `json:"via,omitempty"`
+	AnswerTime   *float64 `json:"answerTime,omitempty"`
+	PauseOnBuzz  *bool    `json:"pauseOnBuzz,omitempty"`
+	Attempts     *int     `json:"attempts,omitempty"`
+	WrongLockout *float64 `json:"wrongLockout,omitempty"`
+	Rebound      *string  `json:"rebound,omitempty"`
+	Fuzziness    *float64 `json:"fuzziness,omitempty"`
 }
 
 type OwnerRules struct {
-	HeadStart   *float64 `json:"headStart"`
-	Exclusive   *bool    `json:"exclusive"`
-	OthersBonus *int     `json:"othersBonus"`
+	HeadStart   *float64 `json:"headStart,omitempty"`
+	Exclusive   *bool    `json:"exclusive,omitempty"`
+	OthersBonus *int     `json:"othersBonus,omitempty"`
 }
 
 type Scoring struct {
-	Type         *string `json:"type"`
-	Max          *int    `json:"max"`
-	Min          *int    `json:"min"`
-	Ranks        []int   `json:"ranks"`
-	WrongPenalty *int    `json:"wrongPenalty"`
-	ReboundBonus *int    `json:"reboundBonus"`
+	Type         *string `json:"type,omitempty"`
+	Max          *int    `json:"max,omitempty"`
+	Min          *int    `json:"min,omitempty"`
+	Ranks        []int   `json:"ranks,omitempty"`
+	WrongPenalty *int    `json:"wrongPenalty,omitempty"`
+	ReboundBonus *int    `json:"reboundBonus,omitempty"`
 }
 
 type Jokers struct {
-	Double *int `json:"double"`
+	Double *int `json:"double,omitempty"`
 }
 
 type Theme struct {
@@ -90,47 +90,47 @@ type Theme struct {
 
 type Track struct {
 	ID           string   `json:"id"`
-	Themes       []string `json:"themes"`
+	Themes       []string `json:"themes,omitempty"`
 	Media        string   `json:"media"`
-	Start        float64  `json:"start"`
-	Duration     float64  `json:"duration"`
-	PlaybackRate float64  `json:"playbackRate"`
-	Reveal       []Reveal `json:"reveal"`
-	Guesses      []Guess  `json:"guesses"`
-	Hints        []Hint   `json:"hints"`
+	Start        float64  `json:"start,omitempty"`
+	Duration     float64  `json:"duration,omitempty"`
+	PlaybackRate float64  `json:"playbackRate,omitempty"`
+	Reveal       []Reveal `json:"reveal,omitempty"`
+	Guesses      []Guess  `json:"guesses,omitempty"`
+	Hints        []Hint   `json:"hints,omitempty"`
 }
 
 type Reveal struct {
-	At    float64  `json:"at"`
-	Audio *bool    `json:"audio"`
-	Video *bool    `json:"video"`
-	Blur  *float64 `json:"blur"`
+	At    float64  `json:"at,omitempty"`
+	Audio *bool    `json:"audio,omitempty"`
+	Video *bool    `json:"video,omitempty"`
+	Blur  *float64 `json:"blur,omitempty"`
 }
 
 type Guess struct {
 	Label   string   `json:"label"`
 	Type    string   `json:"type"`
-	Answers []string `json:"answers"`
+	Answers []string `json:"answers,omitempty"`
 	// Answer is a string for "choice" guesses and a number for "number" guesses.
-	Answer    any      `json:"answer"`
-	Choices   []string `json:"choices"`
-	ChoicesAt float64  `json:"choicesAt"`
-	Tolerance float64  `json:"tolerance"`
-	Scoring   *Scoring `json:"scoring"`
+	Answer    any      `json:"answer,omitempty"`
+	Choices   []string `json:"choices,omitempty"`
+	ChoicesAt float64  `json:"choicesAt,omitempty"`
+	Tolerance float64  `json:"tolerance,omitempty"`
+	Scoring   *Scoring `json:"scoring,omitempty"`
 }
 
 type Hint struct {
-	At   float64 `json:"at"`
-	Text string  `json:"text"`
+	At   float64 `json:"at,omitempty"`
+	Text string  `json:"text,omitempty"`
 }
 
 type Round struct {
 	Name      string   `json:"name"`
 	Selection string   `json:"selection"`
-	Tracks    []string `json:"tracks"`
-	Themes    []string `json:"themes"`
-	Picker    string   `json:"picker"`
-	Count     int      `json:"count"`
-	Eliminate int      `json:"eliminate"`
-	Rules     *Rules   `json:"rules"`
+	Tracks    []string `json:"tracks,omitempty"`
+	Themes    []string `json:"themes,omitempty"`
+	Picker    string   `json:"picker,omitempty"`
+	Count     int      `json:"count,omitempty"`
+	Eliminate int      `json:"eliminate,omitempty"`
+	Rules     *Rules   `json:"rules,omitempty"`
 }

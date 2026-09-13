@@ -120,6 +120,19 @@ func TestTrackTimeUp(t *testing.T) {
 	}
 }
 
+func TestTrackDurationOverridesRules(t *testing.T) {
+	m := withRules(basicManifest(1), obj{"duration": 30})
+	m["tracks"].(list)[0].(obj)["duration"] = 0.05
+	r := newRoom(t, m)
+	alice := newPlayer(t, r, "alice")
+	ctrl, _ := startGame(t, r, alice)
+	var end trackEnd
+	expect(t, ctrl, "track-end", &end)
+	if end.Reason != "time" {
+		t.Fatalf("track-end = %+v, want the track's own 50 ms duration", end)
+	}
+}
+
 func TestTrackTimerStopsDuringPause(t *testing.T) {
 	r := newRoom(t, withRules(basicManifest(1), obj{"duration": 0.2}))
 	alice := newPlayer(t, r, "alice")
