@@ -14,7 +14,7 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, ln) }()
+	go func() { done <- run(ctx, ln, t.TempDir()) }()
 
 	res, err := http.Get("http://" + ln.Addr().String() + "/health")
 	if err != nil {
@@ -34,7 +34,7 @@ func TestRunReturnsServeError(t *testing.T) {
 		t.Fatal(err)
 	}
 	ln.Close()
-	if err := run(context.Background(), ln); err == nil {
+	if err := run(context.Background(), ln, t.TempDir()); err == nil {
 		t.Fatal("run on a closed listener must fail")
 	}
 }

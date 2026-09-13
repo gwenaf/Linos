@@ -3,6 +3,7 @@ package game
 import (
 	"encoding/json"
 	"slices"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,6 +46,7 @@ const (
 	evLeave
 	evBuzzWindowClosed
 	evAnswerTimeout
+	evTrackTimer
 )
 
 type event struct {
@@ -63,12 +65,22 @@ type Room struct {
 	teams   []*team
 	state   string
 
-	masters    map[string]bool
-	invites    map[string]time.Time
-	inviteTTL  time.Duration
-	answerTime time.Duration
+	masters   map[string]bool
+	invites   map[string]time.Time
+	inviteTTL time.Duration
 	// tolerated players may stay disconnected without pausing the game, until they reconnect.
 	tolerated map[*player]bool
+
+	packsDir string
+	// loaded is also read by HTTP handlers serving media, hence atomic.
+	loaded     atomic.Pointer[loadedPack]
+	playlist   []playItem
+	current    int
+	rules      rules
+	trackState string
+	found      map[string]bool
+	// trackSeq invalidates track timers from previous tracks.
+	trackSeq int
 
 	buzzOpen   bool
 	candidates []*player
@@ -85,18 +97,18 @@ type Room struct {
 	turn int
 }
 
-func NewRoom() *Room {
+func NewRoom(packsDir string) *Room {
 	r := &Room{
-		events:     make(chan event, 64),
-		clients:    map[*Client]struct{}{},
-		players:    map[string]*player{},
-		state:      stateLobby,
-		masters:    map[string]bool{},
-		invites:    map[string]time.Time{},
-		inviteTTL:  2 * time.Minute,
-		answerTime: 10 * time.Second,
-		tolerated:  map[*player]bool{},
-		attempted:  map[any]bool{},
+		events:    make(chan event, 64),
+		clients:   map[*Client]struct{}{},
+		players:   map[string]*player{},
+		state:     stateLobby,
+		masters:   map[string]bool{},
+		invites:   map[string]time.Time{},
+		inviteTTL: 2 * time.Minute,
+		tolerated: map[*player]bool{},
+		attempted: map[any]bool{},
+		packsDir:  packsDir,
 	}
 	go r.run()
 	return r
@@ -127,8 +139,10 @@ func (r *Room) run() {
 			}
 		case evAnswerTimeout:
 			if e.turn == r.turn {
-				r.resolveAnswer(false)
+				r.resolveAnswer(false, nil)
 			}
+		case evTrackTimer:
+			r.trackTimer(e.turn)
 		}
 	}
 }
@@ -147,6 +161,9 @@ var commands = map[string]struct {
 	"join-team":     {RolePlayer, lobbyStates},
 	"ready":         {RolePlayer, lobbyStates},
 	"buzz":          {RolePlayer, []string{stateInProgress}},
+	"media-started": {RoleHost, []string{stateInProgress}},
+	"list-packs":    {RoleControl, nil},
+	"configure":     {RoleControl, lobbyStates},
 	"start-game":    {RoleControl, []string{stateReady}},
 	"pause":         {RoleControl, []string{stateInProgress}},
 	"resume":        {RoleControl, []string{statePaused, stateTechnicalPause}},
@@ -194,6 +211,12 @@ func (r *Room) handle(e event) {
 		r.setReady(c, e.msg)
 	case "buzz":
 		r.buzz(c, e.at)
+	case "media-started":
+		r.mediaStarted(c)
+	case "list-packs":
+		r.listPacks(c)
+	case "configure":
+		r.configure(c, e.msg)
 	case "start-game":
 		r.startGame(c)
 	case "pause":
@@ -204,8 +227,7 @@ func (r *Room) handle(e event) {
 	case "validate":
 		r.validate(c, e.msg)
 	case "skip":
-		r.resetTrack()
-		r.openBuzz()
+		r.skip()
 	case "score-adjust":
 		r.scoreAdjust(c, e.msg)
 	case "kick":

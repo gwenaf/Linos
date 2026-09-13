@@ -85,8 +85,14 @@ func (p *Pack) validate() error {
 		if len(t.Guesses) == 0 {
 			v.fail("%s: at least one guess is required", at)
 		}
+		labels := map[string]bool{}
 		for j, g := range t.Guesses {
-			v.guess(fmt.Sprintf("%s.guesses[%d]", at, j), g)
+			gat := fmt.Sprintf("%s.guesses[%d]", at, j)
+			v.guess(gat, g)
+			if labels[g.Label] {
+				v.fail("%s.label %q is duplicated", gat, g.Label)
+			}
+			labels[g.Label] = true
 		}
 	}
 

@@ -4,6 +4,8 @@ import (
 	mrand "math/rand/v2"
 	"slices"
 	"time"
+
+	"github.com/gwenaf/linos/internal/pack"
 )
 
 const buzzWindow = 30 * time.Millisecond
@@ -43,7 +45,7 @@ func (r *Room) closeBuzzWindow() {
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
 	r.stopClock()
 
-	accepted := map[string]any{"name": winner.name, "answerTime": r.answerTime.Seconds()}
+	accepted := map[string]any{"name": winner.name, "answerTime": r.rules.answerTime.Seconds()}
 	if winner.team != nil {
 		accepted["team"] = winner.team.name
 	}
@@ -59,7 +61,7 @@ func (r *Room) closeBuzzWindow() {
 
 func (r *Room) armAnswerTimer() {
 	turn := r.turn
-	time.AfterFunc(r.answerTime, func() { r.events <- event{kind: evAnswerTimeout, turn: turn} })
+	time.AfterFunc(r.rules.answerTime, func() { r.events <- event{kind: evAnswerTimeout, turn: turn} })
 }
 
 func (r *Room) validate(c *Client, m Message) {
@@ -68,7 +70,8 @@ func (r *Room) validate(c *Client, m Message) {
 		return
 	}
 	var d struct {
-		Correct *bool `json:"correct"`
+		Correct *bool  `json:"correct"`
+		Guess   string `json:"guess"`
 	}
 	if !r.decode(c, m, &d) {
 		return
@@ -77,24 +80,58 @@ func (r *Room) validate(c *Client, m Message) {
 		r.sendError(c, "bad-data", "validate requires correct")
 		return
 	}
-	r.resolveAnswer(*d.Correct)
+	g := r.pendingGuess(d.Guess)
+	if *d.Correct && g == nil {
+		r.sendError(c, "unknown-guess", "no guess left named "+d.Guess)
+		return
+	}
+	r.resolveAnswer(*d.Correct, g)
 }
 
-func (r *Room) resolveAnswer(correct bool) {
+// pendingGuess returns the guess not found yet with that label, or the first one left when the label is empty.
+func (r *Room) pendingGuess(label string) *pack.Guess {
+	guesses := r.track().Guesses
+	for i := range guesses {
+		if !r.found[guesses[i].Label] && (label == "" || guesses[i].Label == label) {
+			return &guesses[i]
+		}
+	}
+	return nil
+}
+
+func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
 	p := r.holder
 	r.holder = nil
 	r.turn++
 	r.startClock()
 
-	points := -scoring.wrongPenalty
+	points := -r.rules.wrongPenalty
+	label := ""
 	if correct {
-		points = speedPoints(scoring.max, scoring.min, scoring.duration, r.holderElapsed)
+		label = g.Label
+		r.found[label] = true
+		gr := r.rules
+		if g.Scoring != nil {
+			gr = gr.withScoring(g.Scoring)
+		}
+		points = gr.max
+		if gr.scoringType == "speed" {
+			points = speedPoints(gr.max, gr.min, r.rules.duration, r.holderElapsed)
+		}
 	}
-	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "correct": correct, "points": points}))
+	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "correct": correct, "points": points}))
 	if points != 0 {
 		r.addPoints(p, points)
 	}
-	if !correct {
+
+	switch {
+	case !correct:
+		r.openBuzz()
+	case len(r.found) == len(r.track().Guesses):
+		r.endTrack("found")
+	default:
+		// A new guess is up for grabs: everyone may buzz again.
+		r.attempted = map[any]bool{}
 		r.openBuzz()
 	}
 }
@@ -113,16 +150,6 @@ func (r *Room) openBuzz() {
 	}
 }
 
-func (r *Room) resetTrack() {
-	r.holder = nil
-	r.candidates = nil
-	r.attempted = map[any]bool{}
-	r.turn++
-	r.trackStart = time.Now()
-	r.paused = 0
-	r.clockStops = 0
-}
-
 // stopClock and startClock nest: a holder answering during a game pause stops the clock once.
 func (r *Room) stopClock() {
 	if r.clockStops == 0 {
@@ -135,5 +162,8 @@ func (r *Room) startClock() {
 	r.clockStops--
 	if r.clockStops == 0 {
 		r.paused += time.Since(r.pausedAt)
+		if r.trackState == trackLive {
+			r.armTrackTimer()
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 type answerResult struct {
 	Name    string `json:"name"`
+	Guess   string `json:"guess"`
 	Correct bool   `json:"correct"`
 	Points  int    `json:"points"`
 }
@@ -17,7 +18,7 @@ type buzzAccepted struct {
 }
 
 func TestBuzzPicksOneWinner(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	dave := newPlayer(t, r, "dave")
@@ -49,7 +50,7 @@ func TestBuzzPicksOneWinner(t *testing.T) {
 }
 
 func TestBuzzEdgeCases(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl, _ := startGame(t, r, alice, bob)
@@ -87,7 +88,7 @@ func TestBuzzEdgeCases(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl, _ := startGame(t, r, alice, bob)
@@ -105,7 +106,7 @@ func TestValidate(t *testing.T) {
 	send(r, ctrl, "validate", map[string]bool{"correct": false})
 	var res answerResult
 	expect(t, ctrl, "answer-result", &res)
-	if res != (answerResult{"alice", false, 0}) {
+	if res != (answerResult{"alice", "", false, 0}) {
 		t.Fatalf("result = %+v, want alice wrong", res)
 	}
 	expect(t, ctrl, "buzz-available", nil)
@@ -125,13 +126,17 @@ func TestValidate(t *testing.T) {
 		t.Fatalf("result = %+v, want bob correct with ~100 points", res)
 	}
 
-	send(r, ctrl, "skip", nil)
-	expect(t, alice, "buzz-available", nil)
+}
+
+// withAnswerTime returns the basic pack with a short answer time.
+func withAnswerTime(seconds float64) obj {
+	m := basicManifest(3)
+	m["rules"] = obj{"answer": obj{"answerTime": seconds}}
+	return m
 }
 
 func TestAnswerTimeout(t *testing.T) {
-	r := NewRoom()
-	r.answerTime = 20 * time.Millisecond
+	r := newRoom(t, withAnswerTime(0.02))
 	alice := newPlayer(t, r, "alice")
 	ctrl, _ := startGame(t, r, alice)
 
@@ -144,8 +149,7 @@ func TestAnswerTimeout(t *testing.T) {
 }
 
 func TestStaleTimersIgnored(t *testing.T) {
-	r := NewRoom()
-	r.answerTime = 30 * time.Millisecond
+	r := newRoom(t, withAnswerTime(0.03))
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl, _ := startGame(t, r, alice, bob)
@@ -166,7 +170,7 @@ func TestStaleTimersIgnored(t *testing.T) {
 	// Validating before the answer timeout makes the timer stale.
 	send(r, ctrl, "validate", map[string]bool{"correct": true})
 	expect(t, ctrl, "answer-result", nil)
-	time.Sleep(2 * r.answerTime)
+	time.Sleep(60 * time.Millisecond)
 	send(r, ctrl, "sync", nil)
 	for {
 		m := <-ctrl.inbox
@@ -180,7 +184,7 @@ func TestStaleTimersIgnored(t *testing.T) {
 }
 
 func TestPauseWhileAnswering(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl, _ := startGame(t, r, alice, bob)

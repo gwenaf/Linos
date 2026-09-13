@@ -16,7 +16,7 @@ func Handler(room *game.Room) http.Handler {
 		switch q := req.URL.Query().Get("role"); q {
 		case "", game.RolePlayer:
 		case game.RoleControl, game.RoleHost:
-			if !isLocal(req) {
+			if !IsLocal(req) {
 				http.Error(w, "role reserved to the host machine; use a gamemaster invite", http.StatusForbidden)
 				return
 			}
@@ -54,8 +54,8 @@ func Handler(room *game.Room) http.Handler {
 	})
 }
 
-// isLocal also checks the Host header so a DNS-rebinding page opened on the host PC cannot claim control.
-func isLocal(req *http.Request) bool {
+// IsLocal reports a request from the host machine. It also checks the Host header so a DNS-rebinding page opened on the host PC cannot claim control.
+func IsLocal(req *http.Request) bool {
 	remote, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil || !net.ParseIP(remote).IsLoopback() {
 		return false

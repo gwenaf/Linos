@@ -31,7 +31,7 @@ func TestSpeedPoints(t *testing.T) {
 }
 
 func TestScoreAdjust(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	newPlayer(t, r, "bob")
 	send(r, alice, "join-team", map[string]string{"team": "rouge"})
@@ -80,7 +80,7 @@ func TestResults(t *testing.T) {
 }
 
 func TestTeamScoring(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	carol := newPlayer(t, r, "carol")

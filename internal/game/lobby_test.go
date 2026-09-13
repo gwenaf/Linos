@@ -34,7 +34,7 @@ func teamsAre(names ...string) func(lobbyUpdate) bool {
 }
 
 func TestReconnectWithToken(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	type welcome struct {
 		Token string `json:"token"`
 		Name  string `json:"name"`
@@ -63,7 +63,7 @@ func TestReconnectWithToken(t *testing.T) {
 }
 
 func TestIdentifyErrors(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	newPlayer(t, r, "alice")
 	bob := join(r, RolePlayer, nil)
 	expect(t, bob, "welcome", nil)
@@ -79,7 +79,7 @@ func TestIdentifyErrors(t *testing.T) {
 }
 
 func TestTeams(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl := newControl(t, r)
@@ -126,7 +126,7 @@ func TestTeams(t *testing.T) {
 }
 
 func TestReady(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	anon := join(r, RolePlayer, nil)
@@ -159,7 +159,7 @@ func TestReady(t *testing.T) {
 }
 
 func TestKickInLobby(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl := newControl(t, r)

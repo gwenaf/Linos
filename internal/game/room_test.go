@@ -2,9 +2,58 @@ package game
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+type obj = map[string]any
+type list = []any
+
+// basicManifest is a pack of n tracks with one text guess each, without rounds.
+func basicManifest(n int) obj {
+	tracks := list{}
+	for i := range n {
+		tracks = append(tracks, obj{
+			"id":      fmt.Sprintf("t%d", i+1),
+			"themes":  list{"fr"},
+			"media":   "a.mp3",
+			"guesses": list{obj{"label": "Titre", "type": "text", "answers": list{"x"}}},
+		})
+	}
+	return obj{"version": 1, "title": "Basic", "themes": list{obj{"id": "fr", "name": "FR"}}, "tracks": tracks}
+}
+
+func writePack(t *testing.T, dir, name string, manifest obj) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "manifest.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "a.mp3"), []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newRoom creates a room whose packs folder holds the "basic" pack (3 tracks unless a manifest is given).
+func newRoom(t *testing.T, manifest obj) *Room {
+	t.Helper()
+	if manifest == nil {
+		manifest = basicManifest(3)
+	}
+	dir := t.TempDir()
+	writePack(t, dir, "basic", manifest)
+	return NewRoom(dir)
+}
 
 type testClient struct {
 	*Client
@@ -118,10 +167,13 @@ func newControl(t *testing.T, r *Room) *testClient {
 	return c
 }
 
-// startGame connects control and host, marks the given players ready and starts the game.
+// startGame connects control and host, configures the basic pack, marks the given players ready,
+// starts the game and plays the first track.
 func startGame(t *testing.T, r *Room, players ...*testClient) (ctrl, host *testClient) {
 	t.Helper()
 	ctrl = newControl(t, r)
+	send(r, ctrl, "configure", obj{"pack": "basic"})
+	expect(t, ctrl, "configured", nil)
 	host = join(r, RoleHost, nil)
 	expect(t, host, "welcome", nil)
 	for _, p := range players {
@@ -130,11 +182,20 @@ func startGame(t *testing.T, r *Room, players ...*testClient) (ctrl, host *testC
 	expectState(t, ctrl, stateReady)
 	send(r, ctrl, "start-game", nil)
 	expect(t, ctrl, "game-start", nil)
+	playTrack(t, r, ctrl, host)
 	return ctrl, host
 }
 
+// playTrack waits for the next track and reports its media as playing.
+func playTrack(t *testing.T, r *Room, ctrl, host *testClient) {
+	t.Helper()
+	expect(t, host, "track-start", nil)
+	send(r, host, "media-started", nil)
+	expect(t, ctrl, "timer-start", nil)
+}
+
 func TestDispatchErrors(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	c := connect(r, RolePlayer)
 
 	send(r, c, "buzz", nil)
@@ -153,7 +214,7 @@ func TestDispatchErrors(t *testing.T) {
 }
 
 func TestSlowClientDropped(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	slow := r.Connect(RolePlayer)
 	r.Receive(slow, NewMessage("join", map[string]string{}))
 	alice := newPlayer(t, r, "alice")
@@ -173,7 +234,7 @@ func TestSlowClientDropped(t *testing.T) {
 }
 
 func TestDisconnectTwice(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	r.Disconnect(alice.Client)
 	r.Disconnect(alice.Client)
@@ -184,7 +245,7 @@ func TestDisconnectTwice(t *testing.T) {
 }
 
 func TestReconnectReplacesDevice(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	var w struct {
 		Token string `json:"token"`
 	}
@@ -207,7 +268,7 @@ func TestReconnectReplacesDevice(t *testing.T) {
 }
 
 func TestGamemasterPhone(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	ctrl := newControl(t, r)
 	send(r, ctrl, "master-invite", nil)
 	var inv struct {
@@ -243,7 +304,7 @@ func TestGamemasterPhone(t *testing.T) {
 		t.Fatalf("reconnect role = %q, want control", w.Role)
 	}
 
-	expired := NewRoom()
+	expired := newRoom(t, nil)
 	expired.inviteTTL = -time.Second
 	ctrl2 := newControl(t, expired)
 	send(expired, ctrl2, "master-invite", nil)

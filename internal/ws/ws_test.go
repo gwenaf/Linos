@@ -40,7 +40,7 @@ func joinAndRead(t *testing.T, ctx context.Context, c *websocket.Conn, data any)
 }
 
 func TestWebSocketFlow(t *testing.T) {
-	srv := httptest.NewServer(Handler(game.NewRoom()))
+	srv := httptest.NewServer(Handler(game.NewRoom(t.TempDir())))
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -85,7 +85,7 @@ func TestHandlerRejections(t *testing.T) {
 		req := httptest.NewRequest("GET", tc.url, nil)
 		req.RemoteAddr = tc.remote
 		rec := httptest.NewRecorder()
-		Handler(game.NewRoom()).ServeHTTP(rec, req)
+		Handler(game.NewRoom(t.TempDir())).ServeHTTP(rec, req)
 		if rec.Code != tc.want {
 			t.Errorf("%s: status = %d, want %d", tc.name, rec.Code, tc.want)
 		}
@@ -107,8 +107,8 @@ func TestIsLocal(t *testing.T) {
 	for _, tc := range cases {
 		req := httptest.NewRequest("GET", "/ws", nil)
 		req.RemoteAddr, req.Host = tc.remote, tc.host
-		if got := isLocal(req); got != tc.want {
-			t.Errorf("isLocal(%s, %s) = %v, want %v", tc.remote, tc.host, got, tc.want)
+		if got := IsLocal(req); got != tc.want {
+			t.Errorf("IsLocal(%s, %s) = %v, want %v", tc.remote, tc.host, got, tc.want)
 		}
 	}
 }

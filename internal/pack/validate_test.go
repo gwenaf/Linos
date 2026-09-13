@@ -49,6 +49,9 @@ func TestValidationErrors(t *testing.T) {
 		{"negative start", func(m obj) { firstTrack(m)["start"] = -1 }, "cannot be negative"},
 		{"no guesses", func(m obj) { firstTrack(m)["guesses"] = list{} }, "at least one guess is required"},
 		{"guess label", func(m obj) { firstGuess(m)["label"] = "" }, "guesses[0].label is required"},
+		{"guess label duplicate", func(m obj) {
+			firstTrack(m)["guesses"] = append(firstTrack(m)["guesses"].(list), firstGuess(m))
+		}, `guesses[1].label "Titre" is duplicated`},
 		{"guess type", func(m obj) { firstGuess(m)["type"] = "essay" }, "guesses[0].type"},
 		{"text answers", func(m obj) { delete(firstGuess(m), "answers") }, "a text guess needs answers"},
 		{"choice answer", func(m obj) {

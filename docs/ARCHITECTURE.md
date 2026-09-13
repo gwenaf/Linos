@@ -32,7 +32,7 @@ Exemples :
 
 ### Lecture
 
-- Les médias sont lus **uniquement par la page `/host`**, sur le PC hôte, via `<audio>` / `<video>`. Ils ne transitent jamais vers les téléphones.
+- Les médias sont lus **uniquement par la page `/host`**, sur le PC hôte, via `<audio>` / `<video>`. La route `/media/…` refuse toute requête qui ne vient pas du PC hôte : un téléphone pourrait sinon récupérer l'extrait et l'identifier. Seuls les fichiers référencés par le manifest sont servis (jamais `manifest.json`, qui contient les réponses).
 - Le serveur sert les médias avec `http.ServeContent`, qui gère les requêtes HTTP Range. Le navigateur ne télécharge que les portions nécessaires pour atteindre `start` et lire l'extrait.
 - Les médias d'un gamepack sont lus sans extraction (voir « Gamepack »).
 - Les fichiers importés par glisser-déposer sont lus directement depuis le disque.
@@ -63,6 +63,8 @@ Exemples :
   - toutes les erreurs sont renvoyées en une fois, préfixées par leur chemin (`tracks[2].guesses[0].answer`).
 - Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
 - Import de mp3 par glisser-déposer : manifest généré en mémoire, aucun fichier créé.
+- Déroulé : à `start-game`, les manches sont aplaties en liste de pistes (`sequence` dans l'ordre, `random` tiré parmi les thèmes sans rejouer une piste). Règles effectives d'une piste : valeurs par défaut, puis règles du pack, puis de la manche, puis barème de l'élément deviné.
+- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : manches `theme-pick`, élimination, fin au score ou par élimination, départage, réponses simultanées ou sur l'appareil, plusieurs essais, rebond autre que `others`, `pauseOnBuzz` à faux, propriétaire du thème, jokers, barèmes `rank` et `wager`, bonus de rebond.
 
 ### Builder (projet séparé)
 

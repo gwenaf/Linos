@@ -17,7 +17,7 @@ type gameEnd struct {
 }
 
 func TestGameLifecycle(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	ctrl := newControl(t, r)
 	alice := newPlayer(t, r, "alice")
 
@@ -27,6 +27,10 @@ func TestGameLifecycle(t *testing.T) {
 	expectError(t, ctrl, "wrong-state")
 	send(r, alice, "ready", map[string]bool{"ready": true})
 	expectState(t, ctrl, stateReady)
+	send(r, ctrl, "start-game", nil)
+	expectError(t, ctrl, "no-pack")
+	send(r, ctrl, "configure", obj{"pack": "basic"})
+	expect(t, ctrl, "configured", nil)
 	send(r, ctrl, "start-game", nil)
 	expectError(t, ctrl, "no-host")
 
@@ -74,7 +78,7 @@ func TestGameLifecycle(t *testing.T) {
 }
 
 func TestTechnicalPauseHost(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	ctrl, host := startGame(t, r, alice)
 
@@ -105,7 +109,7 @@ func TestTechnicalPauseHost(t *testing.T) {
 }
 
 func TestTechnicalPausePlayer(t *testing.T) {
-	r := NewRoom()
+	r := newRoom(t, nil)
 	alice := newPlayer(t, r, "alice")
 	bob := join(r, RolePlayer, nil)
 	var w struct {

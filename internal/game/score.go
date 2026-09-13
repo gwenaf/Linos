@@ -6,13 +6,6 @@ import (
 	"time"
 )
 
-// Manifest defaults until pack rules are loaded.
-var scoring = struct {
-	max, min     int
-	duration     time.Duration
-	wrongPenalty int
-}{max: 100, min: 20, duration: 30 * time.Second}
-
 // speedPoints decreases linearly from hi at 0 to lo at duration, then stays at lo.
 func speedPoints(hi, lo int, duration, elapsed time.Duration) int {
 	f := min(max(float64(elapsed)/float64(duration), 0), 1)

@@ -11,8 +11,17 @@ const (
 )
 
 func (r *Room) startGame(c *Client) {
+	if r.loaded.Load() == nil {
+		r.sendError(c, "no-pack", "configure a pack first")
+		return
+	}
 	if !r.hostConnected() {
 		r.sendError(c, "no-host", "open the host screen first")
+		return
+	}
+	playlist := r.buildPlaylist()
+	if len(playlist) == 0 {
+		r.sendError(c, "empty-playlist", "the rounds select no track")
 		return
 	}
 	for _, t := range r.teams {
@@ -25,9 +34,12 @@ func (r *Room) startGame(c *Client) {
 		}
 	}
 	r.state = stateInProgress
-	r.resetTrack()
-	r.broadcast(NewMessage("game-start", nil))
-	r.openBuzz()
+	r.playlist, r.current = playlist, -1
+	r.broadcast(NewMessage("game-start", map[string]any{
+		"title":  r.loaded.Load().pack.Manifest.Title,
+		"tracks": len(playlist),
+	}))
+	r.nextTrack()
 }
 
 // freeze leaves in-progress: pending buzzes are discarded, the holder keeps the hand and the clock stops.
@@ -106,6 +118,8 @@ func (r *Room) endGame(reason string) {
 	r.broadcast(NewMessage("game-end", map[string]any{"reason": reason, "results": r.results()}))
 	r.state = stateLobby
 	r.turn++
+	r.trackSeq++
+	r.trackState = ""
 	r.holder = nil
 	r.candidates = nil
 	r.buzzOpen = false
