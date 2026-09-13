@@ -1,6 +1,9 @@
 package game
 
-import "slices"
+import (
+	"log/slog"
+	"slices"
+)
 
 const (
 	stateLobby          = "lobby"
@@ -33,6 +36,7 @@ func (r *Room) startGame(c *Client) {
 			r.tolerated[p] = true
 		}
 	}
+	slog.Info("game started", "pack", r.loaded.Load().name, "tracks", len(playlist))
 	r.state = stateInProgress
 	r.playlist, r.current = playlist, -1
 	r.broadcast(NewMessage("game-start", map[string]any{
@@ -44,6 +48,7 @@ func (r *Room) startGame(c *Client) {
 
 // freeze leaves in-progress: pending buzzes are discarded, the holder keeps the hand and the clock stops.
 func (r *Room) freeze(state string) {
+	slog.Info("game paused", "state", state)
 	r.state = state
 	r.turn++
 	r.candidates = nil
@@ -63,6 +68,7 @@ func (r *Room) resume() {
 			r.tolerated[p] = true
 		}
 	}
+	slog.Info("game resumed")
 	r.state = stateInProgress
 	r.startClock()
 	r.broadcast(NewMessage("game-resumed", nil))
@@ -84,6 +90,7 @@ func (r *Room) connectionsChanged() {
 		host, players := r.missing()
 		switch {
 		case host || len(players) > 0:
+			slog.Warn("technical pause", "hostMissing", host, "missingPlayers", players)
 			if r.state == stateInProgress {
 				r.freeze(stateTechnicalPause)
 			}
@@ -115,6 +122,7 @@ func (r *Room) broadcastTechnicalPause(hostMissing bool, missingPlayers []string
 
 // endGame publishes the results and returns everyone to the lobby, not ready.
 func (r *Room) endGame(reason string) {
+	slog.Info("game ended", "reason", reason, "results", r.results())
 	r.broadcast(NewMessage("game-end", map[string]any{"reason": reason, "results": r.results()}))
 	r.state = stateLobby
 	r.turn++

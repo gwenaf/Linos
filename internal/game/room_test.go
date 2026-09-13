@@ -1,10 +1,14 @@
 package game
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -144,8 +148,8 @@ func expectState(t *testing.T, c *testClient, state string) {
 	}
 }
 
-// sync waits until every message sent before it has been processed.
-func sync(t *testing.T, r *Room, c *testClient) {
+// settle waits until every message sent before it has been processed.
+func settle(t *testing.T, r *Room, c *testClient) {
 	t.Helper()
 	send(r, c, "sync", nil)
 	expectError(t, c, "unknown-type")
@@ -224,11 +228,11 @@ func TestSlowClientDropped(t *testing.T) {
 		slow.send <- Message{Type: "filler"}
 	}
 	send(r, alice, "identify", map[string]string{"name": "alice2"})
-	sync(t, r, alice)
+	settle(t, r, alice)
 
 	// Messages still delivered for a dropped client are ignored.
 	r.Receive(slow, NewMessage("identify", map[string]string{"name": "ghost"}))
-	sync(t, r, alice)
+	settle(t, r, alice)
 	for range slow.Messages() {
 	}
 }
@@ -241,7 +245,7 @@ func TestDisconnectTwice(t *testing.T) {
 	expectClosed(t, alice)
 
 	bob := newPlayer(t, r, "bob")
-	sync(t, r, bob)
+	settle(t, r, bob)
 }
 
 func TestReconnectReplacesDevice(t *testing.T) {
@@ -311,4 +315,38 @@ func TestGamemasterPhone(t *testing.T) {
 	expect(t, ctrl2, "master-invite", &inv)
 	late := join(expired, RolePlayer, map[string]string{"invite": inv.Code})
 	expectError(t, late, "invalid-invite")
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestLogPanic(t *testing.T) {
+	out := &lockedBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(out, nil)))
+	defer slog.SetDefault(prev)
+
+	var repanicked any
+	func() {
+		defer func() { repanicked = recover() }()
+		defer logPanic()
+		panic("boom")
+	}()
+	if repanicked != "boom" || !strings.Contains(out.String(), `"msg":"room crashed","panic":"boom","stack":`) {
+		t.Fatalf("repanicked = %v, log = %s", repanicked, out)
+	}
 }

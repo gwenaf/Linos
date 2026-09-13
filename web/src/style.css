@@ -1,0 +1,258 @@
+:root {
+  color-scheme: dark;
+  --bg: #14161c;
+  --panel: #1f232c;
+  --text: #eef0f4;
+  --muted: #9aa3b2;
+  --accent: #ff5c8a;
+  --good: #3ecf8e;
+  --bad: #ef5350;
+  --warn: #f5a524;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+section {
+  background: var(--panel);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-block: 1rem;
+}
+
+h1,
+h2 {
+  margin-block: 0.5rem;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: #2c3240;
+  border: none;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  margin: 0.25rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary,
+button.selected {
+  background: var(--accent);
+}
+
+button.good {
+  background: var(--good);
+  color: #0b1a12;
+}
+
+button.bad {
+  background: var(--bad);
+}
+
+input {
+  font: inherit;
+  padding: 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid #3a4150;
+  background: #11141a;
+  color: var(--text);
+  width: 100%;
+  margin-block: 0.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+td {
+  padding: 0.4rem;
+  border-bottom: 1px solid #2c3240;
+}
+
+small {
+  color: var(--muted);
+  display: block;
+}
+
+.error {
+  color: var(--bad);
+  cursor: pointer;
+}
+
+.warning {
+  border: 2px solid var(--warn);
+}
+
+.status {
+  color: var(--warn);
+}
+
+.status.ok {
+  color: var(--good);
+}
+
+.control header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.qr {
+  margin: 0;
+  text-align: center;
+}
+
+.qr img {
+  width: min(16rem, 70vw);
+  background: white;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.qr code {
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.scores,
+.results ol,
+.answers {
+  list-style: none;
+  padding: 0;
+}
+
+.scores li,
+.results li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0;
+}
+
+.holder {
+  font-size: 1.4rem;
+  color: var(--accent);
+}
+
+.banner {
+  background: var(--warn);
+  color: #1a1204;
+  text-align: center;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  font-weight: bold;
+}
+
+/* Host screen: meant for a TV. */
+.host {
+  max-width: none;
+  min-height: 100vh;
+  font-size: 1.5rem;
+}
+
+.host.activate {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  cursor: pointer;
+}
+
+.host .track {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.countdown {
+  font-size: 3rem;
+  font-weight: bold;
+  color: var(--accent);
+}
+
+.stage {
+  display: grid;
+  place-items: center;
+  min-height: 50vh;
+}
+
+.stage video,
+.stage img {
+  max-width: 100%;
+  max-height: 60vh;
+  transition: filter 0.5s;
+}
+
+.players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+}
+
+.players li {
+  background: var(--panel);
+  padding: 0.4rem 0.8rem;
+  border-radius: 1rem;
+}
+
+.players li.ready {
+  outline: 2px solid var(--good);
+}
+
+.hint {
+  color: var(--warn);
+}
+
+/* Phone controller. */
+.play {
+  max-width: 28rem;
+  text-align: center;
+}
+
+.play .track {
+  display: flex;
+  justify-content: space-between;
+}
+
+.buzz {
+  width: min(70vw, 18rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  font-size: 2.5rem;
+  font-weight: bold;
+  background: var(--accent);
+  margin-block: 1.5rem;
+  touch-action: manipulation;
+}
+
+.feedback {
+  font-size: 1.3rem;
+}
+
+.team {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}

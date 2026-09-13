@@ -87,7 +87,7 @@ func TestTeamScoring(t *testing.T) {
 	send(r, alice, "join-team", map[string]string{"team": "rouge"})
 	send(r, bob, "join-team", map[string]string{"team": "rouge"})
 	send(r, carol, "join-team", map[string]string{"team": "bleu"})
-	sync(t, r, carol)
+	settle(t, r, carol)
 	ctrl, _ := startGame(t, r, alice, bob, carol)
 
 	send(r, alice, "buzz", nil)

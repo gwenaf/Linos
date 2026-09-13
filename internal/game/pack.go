@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -51,7 +52,7 @@ func (r *Room) listPacks(c *Client) {
 		}
 		list = append(list, it)
 	}
-	r.send(c, NewMessage("packs", map[string]any{"packs": list}))
+	r.send(c, NewMessage("packs", map[string]any{"dir": r.packsDir, "packs": list}))
 }
 
 func (r *Room) configure(c *Client, m Message) {
@@ -72,9 +73,11 @@ func (r *Room) configure(c *Client, m Message) {
 		}
 	}
 	if err != nil {
+		slog.Warn("pack refused", "pack", d.Pack, "error", err)
 		r.sendError(c, "invalid-pack", err.Error())
 		return
 	}
+	slog.Info("pack configured", "pack", d.Pack, "title", p.Manifest.Title)
 
 	media := map[string]bool{p.Manifest.Cover: true}
 	for _, t := range p.Manifest.Tracks {

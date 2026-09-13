@@ -2,6 +2,8 @@ package game
 
 import (
 	"encoding/json"
+	"log/slog"
+	"runtime/debug"
 	"slices"
 	"sync/atomic"
 	"time"
@@ -127,6 +129,7 @@ func (r *Room) Disconnect(c *Client) {
 }
 
 func (r *Room) run() {
+	defer logPanic()
 	for e := range r.events {
 		switch e.kind {
 		case evMessage:
@@ -182,6 +185,7 @@ func (r *Room) handle(e event) {
 	if c.closed {
 		return
 	}
+	slog.Debug("message received", append(c.logAttrs(), "type", typ)...)
 	if typ == "join" {
 		r.join(c, e.msg)
 		return
@@ -255,6 +259,7 @@ func (r *Room) join(c *Client, m Message) {
 			expiry, ok := r.invites[d.Invite]
 			delete(r.invites, d.Invite)
 			if !ok || time.Now().After(expiry) {
+				slog.Warn("gamemaster invite refused", "known", ok)
 				r.sendError(c, "invalid-invite", "invite unknown or expired")
 				return
 			}
@@ -279,6 +284,7 @@ func (r *Room) join(c *Client, m Message) {
 		welcome["token"] = c.player.token
 		welcome["name"] = c.player.name
 	}
+	slog.Info("client joined", append(c.logAttrs(), "state", r.state)...)
 	r.send(c, NewMessage("welcome", welcome))
 	r.connectionsChanged()
 }
@@ -302,6 +308,7 @@ func (r *Room) send(c *Client, m Message) {
 	case c.send <- m:
 	default:
 		// Slow client: drop it, it reconnects with its token.
+		slog.Warn("slow client dropped", c.logAttrs()...)
 		r.drop(c)
 	}
 }
@@ -313,6 +320,7 @@ func (r *Room) broadcast(m Message) {
 }
 
 func (r *Room) sendError(c *Client, code, message string) {
+	slog.Info("error sent", append(c.logAttrs(), "code", code, "message", message)...)
 	r.send(c, NewMessage("error", map[string]string{"code": code, "message": message}))
 }
 
@@ -320,6 +328,7 @@ func (r *Room) drop(c *Client) {
 	if c.closed {
 		return
 	}
+	slog.Info("client left", c.logAttrs()...)
 	c.closed = true
 	close(c.send)
 	delete(r.clients, c)
@@ -333,4 +342,20 @@ func (r *Room) detach(c *Client) {
 		c.player.client = nil
 	}
 	c.player = nil
+}
+
+// logAttrs identifies a client in logs, never with its token.
+func (c *Client) logAttrs() []any {
+	if c.player != nil {
+		return []any{"role", c.role, "player", c.player.name}
+	}
+	return []any{"role", c.role}
+}
+
+// logPanic writes a crash to the journal before letting it stop the program: the room state cannot be trusted anymore.
+func logPanic() {
+	if v := recover(); v != nil {
+		slog.Error("room crashed", "panic", v, "stack", string(debug.Stack()))
+		panic(v)
+	}
 }

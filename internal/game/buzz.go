@@ -1,6 +1,7 @@
 package game
 
 import (
+	"log/slog"
 	mrand "math/rand/v2"
 	"slices"
 	"time"
@@ -36,6 +37,7 @@ func (r *Room) closeBuzzWindow() {
 		return
 	}
 	winner := r.candidates[mrand.IntN(len(r.candidates))]
+	slog.Info("buzz accepted", "player", winner.name, "candidates", len(r.candidates))
 	r.candidates = nil
 	r.buzzOpen = false
 	r.holder = winner
@@ -119,6 +121,7 @@ func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
 			points = speedPoints(gr.max, gr.min, r.rules.duration, r.holderElapsed)
 		}
 	}
+	slog.Info("answer resolved", "player", p.name, "guess", label, "correct", correct, "points", points)
 	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "correct": correct, "points": points}))
 	if points != 0 {
 		r.addPoints(p, points)

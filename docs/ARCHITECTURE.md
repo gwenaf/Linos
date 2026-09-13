@@ -87,7 +87,10 @@ Exemples :
 ## 4. Front
 
 - **Preact** avec **`@preact/signals`**, build Vite, embarqué dans le binaire via `embed`.
-- Trois routes : `/control` (pilotage, PC hôte), `/host` (affichage, TV) et `/play` (mobile).
+- Trois routes : `/control` (pilotage, PC hôte), `/host` (affichage, TV) et `/play` (mobile), servies par un même `index.html` ; chaque page est un chunk chargé à la demande (un téléphone ne télécharge que `/play`). `/` redirige vers `/control` sur le PC hôte, vers `/play` ailleurs.
+- `/api/join` (adresses de connexion) et `/qr.png?data=…` (QR code généré en Go, `skip2/go-qrcode`) sont réservés au PC hôte.
+- L'écran `/host` exige un clic avant de jouer (politique d'autoplay). Il tient une horloge locale calquée sur celle du serveur (arrêtée en pause et pendant une réponse) pour le compte à rebours, les dévoilements et les indices ; le serveur reste la référence pour le score.
+- `web/dist/.gitkeep` est versionné (recopié depuis `web/public/` à chaque build) pour que `go build` fonctionne avant tout build du front.
 - Rôles `control` et `host` réservés aux connexions depuis l'adresse de bouclage (sinon HTTP 403). Exception : un téléphone maître du jeu obtient `control` via une invitation à usage unique (2 min) créée depuis `control`, puis un jeton de reconnexion. Cas d'usage : un seul écran, `/host` en plein écran sur le PC.
 
 ## 5. Réseau, QR code et sessions
@@ -122,7 +125,15 @@ macOS affiche une demande similaire, répétée à chaque version pour une appli
 
 Image destinée aux utilisateurs avancés qui installent Linos sur leur serveur. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur. `/control` et `/host` n'étant accordés qu'en bouclage, le pilotage à distance passe par l'invitation maître du jeu ; `/host` reste local au serveur.
 
-## 6. Points de vigilance
+## 6. Journalisation
+
+- `log/slog` (stdlib) en JSON, vers la console et `linos.log` (dossier `LINOS_HOME`, par défaut celui de l'exécutable). Pas de SDK OpenTelemetry : une vingtaine de dépendances et plusieurs Mo pour un collecteur qu'une appli hors ligne n'a pas. Le format JSON structuré reste importable dans un outil compatible OpenTelemetry.
+- Niveau `info` par défaut : démarrage (dossiers, adresses), connexions WebSocket, arrivées et départs, événements de partie (pack, lancement, pistes, buzz, réponses, pauses, exclusions, fin), erreurs renvoyées aux clients, requêtes HTTP en échec. `LINOS_LOG_LEVEL=debug` ajoute chaque requête HTTP et chaque message reçu.
+- Jamais de jeton dans les journaux.
+- Plantage du salon : l'événement `room crashed` (valeur et pile d'appels) est écrit avant l'arrêt du programme.
+- Erreurs JavaScript des pages (`error`, `unhandledrejection`, échec de chargement) envoyées par `POST /api/log` (8 Ko max) et journalisées en `front error` avec la page et le navigateur.
+
+## 7. Points de vigilance
 
 - **HTTP en réseau local** : l'API Wake Lock exige HTTPS. Les téléphones peuvent se mettre en veille et couper le WebSocket ; la reconnexion par jeton couvre ce cas.
 - **Lecture automatique** : les navigateurs bloquent le son sans interaction préalable. La page `/host` doit obtenir un clic (par exemple « Lancer la partie ») avant la première piste.

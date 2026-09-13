@@ -3,10 +3,12 @@
 *.exe
 *.test
 *.out
+*.log
 
 # Front
 web/node_modules/
-web/dist/
+web/dist/*
+!web/dist/.gitkeep
 
 # Gamepacks (médias soumis au droit d'auteur)
 /packs/

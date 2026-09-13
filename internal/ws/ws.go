@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 
@@ -17,6 +18,7 @@ func Handler(room *game.Room) http.Handler {
 		case "", game.RolePlayer:
 		case game.RoleControl, game.RoleHost:
 			if !IsLocal(req) {
+				slog.Warn("websocket role refused", "role", q, "remote", req.RemoteAddr, "host", req.Host)
 				http.Error(w, "role reserved to the host machine; use a gamemaster invite", http.StatusForbidden)
 				return
 			}
@@ -28,9 +30,11 @@ func Handler(room *game.Room) http.Handler {
 
 		conn, err := websocket.Accept(w, req, nil)
 		if err != nil {
+			slog.Warn("websocket upgrade failed", "remote", req.RemoteAddr, "error", err)
 			return
 		}
 		defer conn.CloseNow()
+		slog.Info("websocket connected", "role", role, "remote", req.RemoteAddr, "userAgent", req.UserAgent())
 
 		ctx := req.Context()
 		c := room.Connect(role)
@@ -46,6 +50,7 @@ func Handler(room *game.Room) http.Handler {
 		for {
 			var m game.Message
 			if err := wsjson.Read(ctx, conn, &m); err != nil {
+				slog.Info("websocket disconnected", "role", role, "remote", req.RemoteAddr, "reason", err)
 				break
 			}
 			room.Receive(c, m)

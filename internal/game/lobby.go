@@ -3,6 +3,7 @@ package game
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -140,6 +141,7 @@ func (r *Room) kick(c *Client, m Message) {
 		r.sendError(c, "unknown-player", "no player named "+d.Name)
 		return
 	}
+	slog.Info("player kicked", "player", p.name)
 	r.broadcast(NewMessage("kicked", map[string]string{"name": p.name}))
 	delete(r.players, p.token)
 	delete(r.tolerated, p)
@@ -159,6 +161,7 @@ func (r *Room) kick(c *Client, m Message) {
 }
 
 func (r *Room) createInvite(c *Client) {
+	slog.Info("gamemaster invite created")
 	code := newToken()
 	r.invites[code] = time.Now().Add(r.inviteTTL)
 	r.send(c, NewMessage("master-invite", map[string]any{"code": code, "expiresIn": r.inviteTTL.Seconds()}))

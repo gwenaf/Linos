@@ -120,7 +120,7 @@ func TestTeams(t *testing.T) {
 		send(r, alice, "join-team", map[string]string{"team": name})
 		send(r, ctrl, "score-adjust", map[string]any{"team": name, "delta": 1})
 	}
-	sync(t, r, alice)
+	settle(t, r, alice)
 	send(r, bob, "join-team", map[string]string{"team": "one-too-many"})
 	expectError(t, bob, "too-many-teams")
 }
@@ -180,7 +180,7 @@ func TestKickInLobby(t *testing.T) {
 	expectClosed(t, alice)
 
 	r.Disconnect(bob.Client)
-	sync(t, r, ctrl)
+	settle(t, r, ctrl)
 	send(r, ctrl, "kick", map[string]string{"name": "bob"})
 	var lobby lobbyUpdate
 	expect(t, ctrl, "kicked", nil)

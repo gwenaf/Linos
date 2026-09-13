@@ -1,6 +1,7 @@
 package game
 
 import (
+	"log/slog"
 	"maps"
 	mrand "math/rand/v2"
 	"net/url"
@@ -138,6 +139,7 @@ func (r *Room) nextTrack() {
 		}))
 	}
 
+	slog.Info("track started", "index", r.current, "track", it.track.ID)
 	r.rules = it.rules
 	r.trackSeq++
 	r.trackState = trackLoading
@@ -201,6 +203,7 @@ func (r *Room) mediaStarted(c *Client) {
 		r.sendError(c, "wrong-state", "no track is loading")
 		return
 	}
+	slog.Debug("media started", "index", r.current)
 	r.trackState = trackLive
 	r.trackStart = time.Now()
 	r.paused = 0
@@ -232,6 +235,7 @@ func (r *Room) trackTimer(seq int) {
 }
 
 func (r *Room) endTrack(reason string) {
+	slog.Info("track ended", "index", r.current, "reason", reason)
 	r.trackState = trackEnded
 	r.turn++
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false

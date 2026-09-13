@@ -100,7 +100,7 @@ func TestTechnicalPauseHost(t *testing.T) {
 	send(r, ctrl, "pause", nil)
 	expect(t, ctrl, "game-paused", nil)
 	r.Disconnect(host.Client)
-	sync(t, r, ctrl)
+	settle(t, r, ctrl)
 	send(r, ctrl, "resume", nil)
 	expect(t, ctrl, "game-paused", &paused)
 	if paused.Reason != "technical" || !paused.HostMissing {
