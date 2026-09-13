@@ -8,6 +8,9 @@
 web/node_modules/
 web/dist/
 
+# Gamepacks (médias soumis au droit d'auteur)
+/packs/
+
 # Env
 .env
 

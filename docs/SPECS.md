@@ -20,36 +20,46 @@ Un binaire unique lance un serveur local. L'écran hôte et les téléphones son
 
 **Front — TypeScript**
 
-- Vue ou React, build Vite, compilé puis embarqué dans le binaire
+- Preact (`@preact/signals`), build Vite, compilé puis embarqué dans le binaire
 - Route `/host` (plein écran TV) et route `/play` (mobile)
 - Lecture via `<audio>` / `<video>` natifs : le navigateur décode, pas Go
 
 **Exécution**
 
 - Un seul `.exe` (~12 Mo), exécutable depuis une clé USB, sans installation
-- Ouvre le navigateur système sur `localhost` (Chrome embarque Widevine, WebView2 non)
+- Ouvre le navigateur système sur `localhost`
 
 ## Réseau — 3 modes, même code
 
 1. **WiFi existant** — mode par défaut, aucun droit admin
-2. **Hotspot Windows partagé** — optionnel, demande une élévation
+2. **Hotspot Windows partagé** — optionnel, activé manuellement par l'utilisateur en v1, détecté par Linos
 3. **Tunnel Cloudflare** — joueurs en 4G, aucun réseau commun requis
 
 Seule la génération de l'URL du QR code change entre les trois.
 
 ## Contenu
 
-- Packs `.zip` contenant un `manifest.json`
+- Le jeu lit uniquement des fichiers locaux, regroupés dans un **gamepack** `.linospack` (archive ZIP) : un `manifest.json` et les médias (audio, vidéo, image), rangés dans le dossier `packs/` à côté de l'exécutable. Un dossier non zippé au même contenu est aussi accepté (forme d'édition). Exemple de manifest : `docs/manifest.example.json`
+- Un gamepack décrit des pistes, des thèmes et des manches (thèmes et manches facultatifs), ainsi que les règles par défaut
 - Import par glisser-déposer d'un dossier de mp3, lecture automatique des tags
-- Éditeur de packs intégré
-- Providers optionnels derrière une interface commune : fichier local, Spotify (OAuth PKCE, `client_id` saisi par l'utilisateur), YouTube
+- Aucune plateforme de streaming dans le jeu : leurs conditions interdisent l'usage en jeu ou quiz (Spotify, Apple, SoundCloud)
+- Création de gamepacks : builder dans un projet séparé, avec import de playlists. Contrat commun : JSON Schema du manifest, publié dans ce dépôt
+
+## Jeu
+
+- Deux contrôles : avec maître du jeu (validation humaine) ou autonome (validation automatique des réponses)
+- Individuel ou par équipes
+- Réponses au buzz ou simultanées, à l'oral ou sur l'appareil ; éléments à deviner en texte libre, QCM ou nombre
+- Points fixes, dégressifs selon la rapidité (baisse linéaire), par classement ou sur mise
+- Règles surchargeables à trois niveaux : pack, manche, puis lobby
+- Protocole et états : `docs/PROTOCOL.md`
 
 ## Distribution
 
 - Cross-compilation Windows / macOS / Linux via GitHub Actions
 - Signature SignPath (gratuite en open-source) pour éviter SmartScreen
 - Manifestes `winget` et `scoop`, image Docker pour auto-hébergement
-- Licence AGPL (ou MIT si adoption maximale privilégiée)
+- Licence AGPL-3.0
 
 ## Point de départ
 

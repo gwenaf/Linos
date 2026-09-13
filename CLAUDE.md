@@ -5,8 +5,9 @@ Blind test open-source, portable, hors ligne. Un binaire Go unique sert l'écran
 ## Stack
 
 - Backend : Go pur, `CGO_ENABLED=0` obligatoire (binaire unique cross-plateforme, lançable depuis clé USB).
-- Dépendances Go autorisées : `coder/websocket`, `skip2/go-qrcode`, `dhowden/tag`, `grandcat/zeroconf`. Le reste = stdlib. Toute nouvelle dépendance doit être justifiée.
-- Front : TypeScript + Vite (Vue ou React, pas encore tranché), buildé dans `web/dist` puis embarqué via `embed`.
+- Dépendances Go autorisées : `coder/websocket`, `skip2/go-qrcode`, `dhowden/tag`, `grandcat/zeroconf`, `golang.org/x/text`. Le reste = stdlib. Toute nouvelle dépendance doit être justifiée.
+- Front : TypeScript + Vite + Preact (`@preact/signals`), buildé dans `web/dist` puis embarqué via `embed`.
+- Décisions techniques : `docs/ARCHITECTURE.md`. Protocole : `docs/PROTOCOL.md`.
 - Médias lus par `<audio>`/`<video>` natifs du navigateur. Go ne décode jamais de média.
 
 ## Arborescence
@@ -18,9 +19,8 @@ internal/ws/        protocole temps réel : join, buzz, validate, score
 internal/qrcode/    QR code de l'URL de connexion
 internal/network/   3 modes (WiFi, hotspot Windows, tunnel Cloudflare) : ne change que l'URL
 internal/mdns/      annonce blindtest.local
-internal/pack/      packs .zip + manifest.json
+internal/pack/      gamepacks (manifest.json + médias locaux)
 internal/tags/      lecture tags ID3 à l'import
-internal/providers/ interface commune : local, Spotify, YouTube
 web/                front Vite ; web/embed.go expose web/dist au binaire
 web/src/host/       écran hôte
 web/src/play/       manette mobile
@@ -31,7 +31,8 @@ Ordre de dev : serveur + protocole WebSocket d'abord, tout le reste se branche d
 
 ## Conventions
 
-- Code simple : pas d'abstraction sans deuxième implémentation réelle (exception : `providers`, prévu multi-implémentation par les specs).
+- Code simple : pas d'abstraction sans deuxième implémentation réelle.
+- Médias : fichiers locaux uniquement, aucune plateforme de streaming (voir `docs/ARCHITECTURE.md`).
 - Go : `gofmt`, `go vet` propres. Erreurs retournées, pas de `panic` hors `main`.
 - Code, identifiants et commentaires en anglais ; docs et specs en français.
 - Commits : Conventional Commits (`feat:`, `fix:`, `chore:`…).

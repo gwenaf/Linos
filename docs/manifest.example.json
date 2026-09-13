@@ -1,0 +1,151 @@
+{
+  "version": 1,
+  "title": "Années 80",
+  "author": "gwenaf",
+  "language": "fr",
+
+  "game": {
+    "control": { "allowed": ["master", "auto"], "default": "master" },
+    "players": { "teams": "optional", "minTeams": 2, "maxTeams": 8 },
+    "end": { "type": "rounds" },
+    "tiebreak": { "type": "sudden-death", "themes": ["intl"] }
+  },
+
+  "rules": {
+    "duration": 30,
+    "answer": {
+      "mode": "buzz",
+      "via": "device",
+      "answerTime": 10,
+      "pauseOnBuzz": true,
+      "attempts": 1,
+      "wrongLockout": 5,
+      "rebound": "others"
+    },
+    "owner": {
+      "headStart": 0,
+      "exclusive": false,
+      "othersBonus": 0
+    },
+    "scoring": {
+      "type": "speed",
+      "max": 100,
+      "min": 20,
+      "ranks": [100, 60, 30],
+      "wrongPenalty": 0,
+      "reboundBonus": 0
+    },
+    "jokers": { "double": 1 }
+  },
+
+  "themes": [
+    { "id": "fr", "name": "Tubes FR" },
+    { "id": "clips", "name": "Clips cultes" },
+    { "id": "intl", "name": "International" },
+    { "id": "pochettes", "name": "Pochettes d'album" }
+  ],
+
+  "tracks": [
+    {
+      "id": "daho-weekend",
+      "themes": ["fr", "clips"],
+      "media": "media/01.mp4",
+      "start": 42,
+      "reveal": [
+        { "at": 0, "audio": true, "video": false },
+        { "at": 15, "video": true }
+      ],
+      "guesses": [
+        { "label": "Artiste", "type": "text", "answers": ["Étienne Daho", "Daho"] },
+        { "label": "Titre", "type": "text", "answers": ["Week-end à Rome"], "scoring": { "max": 50, "min": 10 } },
+        { "label": "Année", "type": "number", "answer": 1984, "tolerance": 1 }
+      ],
+      "hints": [
+        { "at": 10, "text": "Chanteur rennais" },
+        { "at": 20, "text": "Sortie dans les années 80" }
+      ]
+    },
+    {
+      "id": "indochine-aventurier",
+      "themes": ["fr", "clips"],
+      "media": "media/02.mp4",
+      "start": 0,
+      "reveal": [
+        { "at": 0, "audio": false, "video": true },
+        { "at": 15, "audio": true }
+      ],
+      "guesses": [
+        { "label": "Artiste", "type": "text", "answers": ["Indochine"] }
+      ]
+    },
+    {
+      "id": "aha-takeonme",
+      "themes": ["intl"],
+      "media": "media/03.mp3",
+      "start": 60,
+      "playbackRate": 1.25,
+      "guesses": [
+        {
+          "label": "Titre",
+          "type": "choice",
+          "choices": ["Take On Me", "The Final Countdown", "Don't You Want Me"],
+          "answer": "Take On Me",
+          "choicesAt": 5
+        }
+      ]
+    },
+    {
+      "id": "cure-disintegration",
+      "themes": ["pochettes", "intl"],
+      "media": "media/04.jpg",
+      "duration": 20,
+      "reveal": [
+        { "at": 0, "blur": 30 },
+        { "at": 10, "blur": 10 },
+        { "at": 18, "blur": 0 }
+      ],
+      "guesses": [
+        { "label": "Album", "type": "text", "answers": ["Disintegration"] }
+      ]
+    }
+  ],
+
+  "rounds": [
+    {
+      "name": "Échauffement",
+      "selection": "sequence",
+      "tracks": ["daho-weekend", "aha-takeonme"],
+      "rules": { "scoring": { "type": "fixed", "max": 50 } }
+    },
+    {
+      "name": "Choix du thème",
+      "selection": "theme-pick",
+      "picker": "rotation",
+      "themes": ["fr", "clips", "intl"],
+      "count": 6,
+      "rules": {
+        "owner": { "headStart": 10, "exclusive": false, "othersBonus": 20 }
+      }
+    },
+    {
+      "name": "Réponses écrites",
+      "selection": "random",
+      "themes": ["pochettes", "intl"],
+      "count": 4,
+      "rules": {
+        "answer": { "mode": "simultaneous" },
+        "scoring": { "type": "rank" }
+      }
+    },
+    {
+      "name": "Finale",
+      "selection": "sequence",
+      "tracks": ["indochine-aventurier"],
+      "eliminate": 0,
+      "rules": {
+        "scoring": { "type": "wager" },
+        "jokers": { "double": 0 }
+      }
+    }
+  ]
+}
