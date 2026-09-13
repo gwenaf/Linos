@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, isLocalPage, store, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey, scoreTable } from './ui'
+import { Answers, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -33,6 +33,12 @@ const controlMode = signal('master')
 // Answers typed on phones: the holder's pending answer (buzz mode) and everything answered (simultaneous mode).
 const holderAnswer = signal<Data>(null)
 const submissions = signal<Data[]>([])
+const pick = signal<Data>(null)
+const wagerRequest = signal<Data>(null)
+const eliminated = signal<string[]>([])
+const tiebreak = signal<string[] | null>(null)
+const events = signal<string[]>([])
+const logEvent = (text: string) => (events.value = [text, ...events.value].slice(0, 8))
 
 const network = signal<Data>(null)
 const showHelp = signal(false)
@@ -81,6 +87,34 @@ conn.on('state', (d) => {
   holder.value = d.holder ?? null
   paused.value = d.paused ?? null
   scores.value = scoreTable(d.scores)
+  pick.value = d.pick ?? null
+  wagerRequest.value = d.wager ?? null
+  eliminated.value = (d.eliminated ?? []).map(unitName)
+  tiebreak.value = d.tiebreak?.map(unitName) ?? null
+})
+conn.on('theme-pick-request', (d) => (pick.value = d))
+conn.on('theme-picked', (d) => {
+  pick.value = null
+  logEvent(`${unitName(d)} a choisi le thème ${d.theme}`)
+})
+conn.on('wager-request', (d) => (wagerRequest.value = d))
+conn.on('wagered', (d) => {
+  if (!wagerRequest.value) return
+  wagerRequest.value = {
+    limits: wagerRequest.value.limits.map((l: Data) => (unitName(l) === unitName(d) ? { ...l, placed: true } : l)),
+  }
+})
+conn.on('joker-used', (d) => logEvent(`${unitName(d)} joue son joker double`))
+conn.on('head-start-over', () => logEvent("Fin de l'avance du propriétaire du thème"))
+conn.on('round-end', (d) => logEvent(`Fin de la manche ${d.name}`))
+conn.on('eliminated', (d) => {
+  eliminated.value = [...eliminated.value, ...d.units.map(unitName)]
+  if (d.units.length) logEvent(`Éliminé : ${d.units.map(unitName).join(', ')}`)
+})
+conn.on('tiebreak', (d) => {
+  const units: string[] = d.units.map(unitName)
+  tiebreak.value = units
+  logEvent(`Mort subite : ${units.join(' contre ')}`)
 })
 conn.on('lobby-update', (d) => {
   lobby.value = d
@@ -104,6 +138,9 @@ conn.on('game-start', () => {
   scores.value = {}
   results.value = null
   round.value = null
+  eliminated.value = []
+  tiebreak.value = null
+  events.value = []
 })
 conn.on('round-start', (d) => (round.value = d))
 conn.on('track-start', (d) => {
@@ -113,6 +150,8 @@ conn.on('track-start', (d) => {
   holder.value = null
   holderAnswer.value = null
   submissions.value = []
+  pick.value = null
+  wagerRequest.value = null
 })
 conn.on('buzz-accepted', (d) => {
   holder.value = d
@@ -313,6 +352,36 @@ function Game() {
         </section>
       )}
       {round.value && <h2>Manche : {round.value.name}</h2>}
+      {tiebreak.value && <p class="holder">Mort subite : {tiebreak.value.join(' contre ')}</p>}
+      {eliminated.value.length > 0 && <p>Éliminés : {eliminated.value.join(', ')}</p>}
+      {pick.value && (
+        <section>
+          <p>
+            <strong>{unitName(pick.value.picker)}</strong> choisit un thème parmi : {pick.value.themes.map((th: Data) => th.name).join(', ')}
+          </p>
+          <button onClick={() => conn.send('skip')}>Passer ce choix</button>
+        </section>
+      )}
+      {wagerRequest.value && (
+        <section>
+          <h3>Mises</h3>
+          <ul>
+            {wagerRequest.value.limits.map((l: Data) => (
+              <li key={unitName(l)}>
+                {unitName(l)} (jusqu'à {l.max}) : {l.placed ? 'misé' : 'en attente'}
+              </li>
+            ))}
+          </ul>
+          <button onClick={() => conn.send('skip')}>Passer cette piste</button>
+        </section>
+      )}
+      {events.value.length > 0 && (
+        <ul class="events">
+          {events.value.map((e, i) => (
+            <li key={i}>{e}</li>
+          ))}
+        </ul>
+      )}
       {t && (
         <section>
           <h2>

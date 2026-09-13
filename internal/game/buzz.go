@@ -22,6 +22,10 @@ func (r *Room) buzz(c *Client, at time.Time) {
 		return
 	}
 	u := unit(p)
+	if !r.mayPlay(u) {
+		r.sendError(c, "not-allowed", "you cannot answer this track now")
+		return
+	}
 	if !r.buzzOpen || r.attempted[u] || slices.ContainsFunc(r.candidates, func(q *player) bool { return unit(q) == u }) {
 		return
 	}
@@ -112,19 +116,11 @@ func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
 	r.turn++
 	r.startClock()
 
-	points := -r.rules.wrongPenalty
+	points := r.pointsFor(unit(p), g, correct, r.holderElapsed)
 	label := ""
 	if correct {
 		label = g.Label
 		r.found[label] = true
-		gr := r.rules
-		if g.Scoring != nil {
-			gr = gr.withScoring(g.Scoring)
-		}
-		points = gr.max
-		if gr.scoringType == "speed" {
-			points = speedPoints(gr.max, gr.min, r.rules.duration, r.holderElapsed)
-		}
 	}
 	slog.Info("answer resolved", "player", p.name, "guess", label, "correct", correct, "points", points)
 	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "correct": correct, "points": points}))
@@ -152,7 +148,7 @@ func (r *Room) openBuzz() {
 	}
 	available := NewMessage("buzz-available", nil)
 	for c := range r.clients {
-		if c.player == nil || !r.attempted[unit(c.player)] {
+		if c.player == nil || !r.attempted[unit(c.player)] && r.mayPlay(unit(c.player)) {
 			r.send(c, available)
 		}
 	}
@@ -172,6 +168,9 @@ func (r *Room) startClock() {
 		r.paused += time.Since(r.pausedAt)
 		if r.trackState == trackLive {
 			r.armTrackTimer()
+			if !r.headStartOver {
+				r.armHeadStart()
+			}
 		}
 	}
 }

@@ -28,6 +28,10 @@ type rules struct {
 	max, min     int
 	ranks        []int
 	wrongPenalty int
+	headStart    time.Duration
+	exclusive    bool
+	othersBonus  int
+	doubleJokers int
 }
 
 var defaultRules = rules{
@@ -63,6 +67,20 @@ func (r rules) with(p *pack.Rules) rules {
 			r.fuzziness = *a.Fuzziness
 		}
 	}
+	if o := p.Owner; o != nil {
+		if o.HeadStart != nil {
+			r.headStart = seconds(*o.HeadStart)
+		}
+		if o.Exclusive != nil {
+			r.exclusive = *o.Exclusive
+		}
+		if o.OthersBonus != nil {
+			r.othersBonus = *o.OthersBonus
+		}
+	}
+	if p.Jokers != nil && p.Jokers.Double != nil {
+		r.doubleJokers = *p.Jokers.Double
+	}
 	if p.Scoring != nil {
 		r = r.withScoring(p.Scoring)
 	}
@@ -93,8 +111,8 @@ func seconds(s float64) time.Duration {
 }
 
 type playItem struct {
-	round int // -1 when the pack has no rounds
-	track *pack.Track
+	round int         // -1 when the pack has no rounds, and for tiebreak tracks
+	track *pack.Track // nil until picked, in theme-pick rounds
 	rules rules
 }
 
@@ -102,14 +120,16 @@ func (r *Room) track() *pack.Track {
 	return r.playlist[r.current].track
 }
 
-// buildPlaylist flattens the rounds into the ordered list of tracks to play.
+// buildPlaylist flattens the rounds into the ordered list of tracks to play; theme-pick tracks are chosen later.
 func (r *Room) buildPlaylist() []playItem {
-	m := &r.loaded.Load().pack.Manifest
+	m := r.manifest()
 	base := defaultRules.with(m.Rules)
+	r.used = map[string]bool{}
 	if len(m.Rounds) == 0 {
 		items := make([]playItem, len(m.Tracks))
 		for i := range m.Tracks {
 			items[i] = playItem{-1, &m.Tracks[i], base}
+			r.used[m.Tracks[i].ID] = true
 		}
 		return items
 	}
@@ -118,16 +138,21 @@ func (r *Room) buildPlaylist() []playItem {
 	for i := range m.Tracks {
 		byID[m.Tracks[i].ID] = &m.Tracks[i]
 	}
-	used := map[string]bool{}
 	var items []playItem
 	for ri, rd := range m.Rounds {
+		rr := base.with(rd.Rules)
+		if rd.Selection == "theme-pick" {
+			for range rd.Count {
+				items = append(items, playItem{ri, nil, rr})
+			}
+			continue
+		}
 		ids := rd.Tracks
 		if rd.Selection == "random" {
-			ids = randomTracks(m, rd, used)
+			ids = randomTracks(m, rd, r.used)
 		}
-		rr := base.with(rd.Rules)
 		for _, id := range ids {
-			used[id] = true
+			r.used[id] = true
 			items = append(items, playItem{ri, byID[id], rr})
 		}
 	}
@@ -147,29 +172,44 @@ func randomTracks(m *pack.Manifest, rd pack.Round, used map[string]bool) []strin
 	return ids[:min(rd.Count, len(ids))]
 }
 
+// nextTrack moves to the next playlist item, closing the round it leaves and adding tiebreak tracks at the end.
 func (r *Room) nextTrack() {
+	prev := -1
+	if r.current >= 0 {
+		prev = r.playlist[r.current].round
+	}
 	r.current++
-	if r.current >= len(r.playlist) {
+	if prev >= 0 && (r.current >= len(r.playlist) || r.playlist[r.current].round != prev) && r.endRound(prev) {
+		return
+	}
+	if r.current >= len(r.playlist) && !r.addTiebreak() {
 		r.endGame("ended")
 		return
 	}
 	it := r.playlist[r.current]
-	if it.round >= 0 && (r.current == 0 || r.playlist[r.current-1].round != it.round) {
+	if it.round >= 0 && it.round != prev {
+		r.picks = 0
 		r.broadcast(NewMessage("round-start", r.roundPayload()))
 	}
-
-	slog.Info("track started", "index", r.current, "track", it.track.ID)
 	r.rules = it.rules
 	r.trackSeq++
+	r.turn++
+	r.owner, r.picker, r.wagers = nil, nil, nil
+	r.doubled = map[any]bool{}
+	r.holder, r.candidates, r.buzzOpen = nil, nil, false
+	r.prepareTrack()
+}
+
+func (r *Room) startTrack() {
+	slog.Info("track started", "index", r.current, "track", r.track().ID)
 	r.trackState = trackLoading
 	r.found = map[string]bool{}
 	r.answered = map[string]map[any]bool{}
 	r.correctCount = map[string]int{}
 	r.pendingPoints = nil
-	r.holder, r.candidates, r.buzzOpen = nil, nil, false
 	r.attempted = map[any]bool{}
-	r.turn++
 	r.paused, r.clockStops = 0, 0
+	r.headStartOver = r.owner == nil || r.rules.headStart == 0
 	r.sendTrackStart()
 }
 
@@ -182,7 +222,7 @@ type publicGuess struct {
 
 func (r *Room) roundPayload() map[string]any {
 	i := r.playlist[r.current].round
-	return map[string]any{"index": i, "name": r.loaded.Load().pack.Manifest.Rounds[i].Name}
+	return map[string]any{"index": i, "name": r.manifest().Rounds[i].Name}
 }
 
 // trackPayload tells players what to guess, the host how to play the media, and control the answers too.
@@ -201,6 +241,11 @@ func (r *Room) trackPayload(role string) map[string]any {
 		"guesses":  guesses,
 		"mode":     it.rules.mode,
 		"via":      it.rules.via,
+	}
+	if r.owner != nil {
+		public["owner"] = unitPayload(r.owner)
+		public["headStart"] = it.rules.headStart.Seconds()
+		public["exclusive"] = it.rules.exclusive
 	}
 	rate := t.PlaybackRate
 	if rate == 0 {
@@ -244,6 +289,9 @@ func (r *Room) mediaStarted(c *Client) {
 		r.openBuzz()
 	}
 	r.armTrackTimer()
+	if !r.headStartOver {
+		r.armHeadStart()
+	}
 }
 
 // elapsed is the track time actually played: pauses and answers, finished or ongoing, excluded.
@@ -272,6 +320,8 @@ func (r *Room) trackTimer(seq int) {
 	r.endTrack("time")
 }
 
+// endTrack reveals the answers, applies the points kept hidden during simultaneous answers
+// and ends the game if a unit reached the target score.
 func (r *Room) endTrack(reason string) {
 	slog.Info("track ended", "index", r.current, "reason", reason)
 	r.trackState = trackEnded
@@ -285,15 +335,19 @@ func (r *Room) endTrack(reason string) {
 		}
 	}
 	r.pendingPoints = nil
+	r.scoreReached()
 }
 
 func (r *Room) trackEndPayload() map[string]any {
 	return map[string]any{"index": r.current, "reason": r.endReason, "guesses": r.track().Guesses}
 }
 
+// skip ends the current track if it started, and moves on; a pending theme pick or wager is dropped.
 func (r *Room) skip() {
-	if r.trackState != trackEnded {
+	if r.trackState == trackLoading || r.trackState == trackLive {
 		r.endTrack("skipped")
 	}
-	r.nextTrack()
+	if r.state == stateInProgress {
+		r.nextTrack()
+	}
 }

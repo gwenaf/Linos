@@ -15,7 +15,7 @@ import (
 func TestConfigure(t *testing.T) {
 	r := newRoom(t, nil)
 	unsupportedPack := basicManifest(1)
-	unsupportedPack["game"] = obj{"tiebreak": obj{"type": "sudden-death"}}
+	unsupportedPack["rules"] = obj{"answer": obj{"attempts": 2}}
 	writePack(t, r.packsDir, "later", unsupportedPack)
 	ctrl := newControl(t, r)
 
@@ -57,7 +57,7 @@ func TestConfigure(t *testing.T) {
 func TestListPacks(t *testing.T) {
 	r := newRoom(t, nil)
 	unsupportedPack := basicManifest(1)
-	unsupportedPack["rules"] = obj{"jokers": obj{"double": 1}}
+	unsupportedPack["rules"] = obj{"answer": obj{"rebound": "none"}}
 	writePack(t, r.packsDir, "later", unsupportedPack)
 	os.WriteFile(filepath.Join(r.packsDir, "broken.linospack"), []byte("not a zip"), 0o644)
 	os.WriteFile(filepath.Join(r.packsDir, "notes.txt"), []byte("ignored"), 0o644)
@@ -80,7 +80,7 @@ func TestListPacks(t *testing.T) {
 	if broken.Name != "broken.linospack" || broken.Error == "" {
 		t.Errorf("broken = %+v, want an error", broken)
 	}
-	if later.Title != "Basic" || !strings.Contains(later.Error, "rules.jokers") {
+	if later.Title != "Basic" || !strings.Contains(later.Error, "rules.answer.rebound") {
 		t.Errorf("later = %+v, want its title and the unsupported feature", later)
 	}
 
@@ -127,19 +127,12 @@ func TestUnsupported(t *testing.T) {
 		m    pack.Manifest
 		want string
 	}{
-		{"end", pack.Manifest{Game: pack.Game{End: pack.End{Type: "score"}}}, `game.end.type "score"`},
-		{"tiebreak", pack.Manifest{Game: pack.Game{Tiebreak: pack.Tiebreak{Type: "sudden-death"}}}, "game.tiebreak"},
-		{"theme-pick", pack.Manifest{Rounds: []pack.Round{{Selection: "theme-pick"}}}, "rounds[0].selection theme-pick"},
-		{"eliminate", pack.Manifest{Rounds: []pack.Round{{Eliminate: 1}}}, "rounds[0].eliminate"},
 		{"round rules", pack.Manifest{Rounds: []pack.Round{{Rules: rules(pack.Rules{Answer: &pack.AnswerRules{Attempts: i(3)}})}}}, "rounds[0].rules.answer.attempts"},
 		{"attempts", pack.Manifest{Rules: rules(pack.Rules{Answer: &pack.AnswerRules{Attempts: i(2)}})}, "rules.answer.attempts"},
 		{"rebound", pack.Manifest{Rules: rules(pack.Rules{Answer: &pack.AnswerRules{Rebound: s("none")}})}, "rules.answer.rebound"},
 		{"pauseOnBuzz", pack.Manifest{Rules: rules(pack.Rules{Answer: &pack.AnswerRules{PauseOnBuzz: b(false)}})}, "rules.answer.pauseOnBuzz"},
-		{"owner", pack.Manifest{Rules: rules(pack.Rules{Owner: &pack.OwnerRules{HeadStart: f(10)}})}, "rules.owner"},
-		{"jokers", pack.Manifest{Rules: rules(pack.Rules{Jokers: &pack.Jokers{Double: i(1)}})}, "rules.jokers"},
-		{"scoring type", pack.Manifest{Rules: rules(pack.Rules{Scoring: &pack.Scoring{Type: s("wager")}})}, "rules.scoring.type"},
 		{"rebound bonus", pack.Manifest{Rules: rules(pack.Rules{Scoring: &pack.Scoring{ReboundBonus: i(5)}})}, "rules.scoring.reboundBonus"},
-		{"guess scoring", pack.Manifest{Tracks: []pack.Track{{Guesses: []pack.Guess{{Scoring: &pack.Scoring{Type: s("wager")}}}}}}, "tracks[0].guesses[0].scoring.type"},
+		{"guess scoring", pack.Manifest{Tracks: []pack.Track{{Guesses: []pack.Guess{{Scoring: &pack.Scoring{ReboundBonus: i(1)}}}}}}, "tracks[0].guesses[0].scoring.reboundBonus"},
 	}
 	for _, tc := range cases {
 		if err := unsupported(&tc.m); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -148,16 +141,39 @@ func TestUnsupported(t *testing.T) {
 	}
 
 	supported := pack.Manifest{
-		Game: pack.Game{End: pack.End{Type: "rounds"}},
+		Game: pack.Game{End: pack.End{Type: "score", Target: 500}, Tiebreak: pack.Tiebreak{Type: "sudden-death"}},
 		Rules: rules(pack.Rules{
-			Answer:  &pack.AnswerRules{Mode: s("buzz"), Via: s("oral"), Attempts: i(1), Rebound: s("others"), PauseOnBuzz: b(true)},
-			Owner:   &pack.OwnerRules{HeadStart: f(0), Exclusive: b(false), OthersBonus: i(0)},
-			Jokers:  &pack.Jokers{Double: i(0)},
-			Scoring: &pack.Scoring{Type: s("fixed"), ReboundBonus: i(0)},
+			Answer:  &pack.AnswerRules{Mode: s("simultaneous"), Via: s("device"), Attempts: i(1), Rebound: s("others"), PauseOnBuzz: b(true)},
+			Owner:   &pack.OwnerRules{HeadStart: f(10), Exclusive: b(true), OthersBonus: i(20)},
+			Jokers:  &pack.Jokers{Double: i(1)},
+			Scoring: &pack.Scoring{Type: s("wager"), ReboundBonus: i(0)},
 		}),
-		Rounds: []pack.Round{{Selection: "sequence"}, {Selection: "random"}},
+		Rounds: []pack.Round{{Selection: "sequence"}, {Selection: "random"}, {Selection: "theme-pick", Eliminate: 1}},
 	}
 	if err := unsupported(&supported); err != nil {
 		t.Fatalf("supported manifest refused: %v", err)
+	}
+}
+
+func TestExampleManifestIsPlayable(t *testing.T) {
+	example, err := os.ReadFile("../../docs/manifest.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"manifest.json", "media/01.mp4", "media/02.mp4", "media/03.mp3", "media/04.jpg"} {
+		path := filepath.Join(dir, "example", filepath.FromSlash(name))
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, example, 0o644)
+	}
+	r := NewRoom(dir)
+	ctrl := newControl(t, r)
+	for _, control := range []string{"master", "auto"} {
+		send(r, ctrl, "configure", obj{"pack": "example", "control": control})
+		var conf struct{ Control string }
+		expect(t, ctrl, "configured", &conf)
+		if conf.Control != control {
+			t.Fatalf("configured = %+v, want %s", conf, control)
+		}
 	}
 }

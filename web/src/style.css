@@ -286,3 +286,8 @@ small {
 .control label {
   display: block;
 }
+
+.events {
+  color: var(--muted);
+  font-size: 0.9rem;
+}

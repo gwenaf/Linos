@@ -63,6 +63,10 @@ func (r *Room) answer(c *Client, m Message, at time.Time) {
 func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) {
 	p := c.player
 	u := unit(p)
+	if !r.mayPlay(u) {
+		r.sendError(c, "not-allowed", "you cannot answer this track now")
+		return
+	}
 	g := r.unansweredGuess(u, label)
 	if g == nil {
 		r.sendError(c, "unknown-guess", "no guess left to answer named "+label)
@@ -74,25 +78,9 @@ func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) 
 	r.answered[g.Label][u] = true
 
 	correct := matches(g, value, r.rules.fuzziness)
-	points := -r.rules.wrongPenalty
+	points := r.pointsFor(u, g, correct, at.Sub(r.trackStart)-r.paused)
 	if correct {
 		r.found[g.Label] = true
-		gr := r.rules
-		if g.Scoring != nil {
-			gr = gr.withScoring(g.Scoring)
-		}
-		switch gr.scoringType {
-		case "speed":
-			points = speedPoints(gr.max, gr.min, r.rules.duration, at.Sub(r.trackStart)-r.paused)
-		case "rank":
-			points = 0
-			if n := r.correctCount[g.Label]; n < len(gr.ranks) {
-				points = gr.ranks[n]
-			}
-			r.correctCount[g.Label]++
-		default:
-			points = gr.max
-		}
 	}
 	r.pendingPoints = append(r.pendingPoints, scored{p, points})
 	slog.Info("answer submitted", "player", p.name, "guess", g.Label, "value", value, "correct", correct, "points", points)
@@ -135,16 +123,11 @@ func (r *Room) unansweredGuess(u any, label string) *pack.Guess {
 	return nil
 }
 
-// allAnswered reports whether every connected team or player has answered every guess.
+// allAnswered reports whether every connected team or player in play has answered every guess.
 func (r *Room) allAnswered() bool {
-	units := map[any]bool{}
-	for _, p := range r.players {
-		if p.name != "" && p.client != nil {
-			units[unit(p)] = true
-		}
-	}
+	units := r.playingUnits()
 	for _, g := range r.track().Guesses {
-		for u := range units {
+		for _, u := range units {
 			if !r.answered[g.Label][u] {
 				return false
 			}

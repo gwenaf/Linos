@@ -143,6 +143,7 @@ func (r *Room) kick(c *Client, m Message) {
 	}
 	slog.Info("player kicked", "player", p.name)
 	r.broadcast(NewMessage("kicked", map[string]string{"name": p.name}))
+	u := unit(p)
 	delete(r.players, p.token)
 	delete(r.tolerated, p)
 	r.setTeam(p, nil)
@@ -153,11 +154,25 @@ func (r *Room) kick(c *Client, m Message) {
 		r.startClock()
 		r.openBuzz()
 	}
+	r.unitsChanged(u)
 	if p.client != nil {
 		r.drop(p.client)
 		return
 	}
 	r.connectionsChanged()
+}
+
+// unitsChanged unblocks a theme pick or wagers waiting for a unit that just left the game.
+func (r *Room) unitsChanged(left any) {
+	switch {
+	case r.trackState == trackPicking && r.picker == left && !slices.Contains(r.playingUnits(), left):
+		r.picks--
+		if !r.requestPick() {
+			r.nextTrack()
+		}
+	case r.trackState == trackWagering:
+		r.startIfAllWagered()
+	}
 }
 
 func (r *Room) createInvite(c *Client) {

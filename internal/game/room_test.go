@@ -181,6 +181,14 @@ func startGame(t *testing.T, r *Room, players ...*testClient) (ctrl, host *testC
 // startGameWith is startGame with explicit configure data (pack and control).
 func startGameWith(t *testing.T, r *Room, configure obj, players ...*testClient) (ctrl, host *testClient) {
 	t.Helper()
+	ctrl, host = launch(t, r, configure, players...)
+	playTrack(t, r, ctrl, host)
+	return ctrl, host
+}
+
+// launch configures, readies the players and starts the game, without playing the first track.
+func launch(t *testing.T, r *Room, configure obj, players ...*testClient) (ctrl, host *testClient) {
+	t.Helper()
 	ctrl = newControl(t, r)
 	send(r, ctrl, "configure", configure)
 	expect(t, ctrl, "configured", nil)
@@ -192,7 +200,6 @@ func startGameWith(t *testing.T, r *Room, configure obj, players ...*testClient)
 	expectState(t, ctrl, stateReady)
 	send(r, ctrl, "start-game", nil)
 	expect(t, ctrl, "game-start", nil)
-	playTrack(t, r, ctrl, host)
 	return ctrl, host
 }
 

@@ -49,6 +49,7 @@ const (
 	evBuzzWindowClosed
 	evAnswerTimeout
 	evTrackTimer
+	evHeadStart
 )
 
 type event struct {
@@ -88,6 +89,20 @@ type Room struct {
 	correctCount   map[string]int
 	pendingPoints  []scored
 	holderAnswered bool
+
+	// Round features: tracks already in the game, theme pick (picker, picks this round, owner and its head start),
+	// wagers, double jokers, eliminated units and the units of a running tiebreak.
+	used          map[string]bool
+	picker        any
+	picks         int
+	owner         any
+	headStartOver bool
+	wagers        map[any]int
+	doubled       map[any]bool
+	jokersUsed    map[any]int
+	jokerLimit    int
+	eliminated    map[any]bool
+	tiebreak      map[any]bool
 	// trackSeq invalidates track timers from previous tracks.
 	trackSeq int
 
@@ -153,6 +168,8 @@ func (r *Room) run() {
 			}
 		case evTrackTimer:
 			r.trackTimer(e.turn)
+		case evHeadStart:
+			r.headStartTimer(e.turn)
 		}
 	}
 }
@@ -172,6 +189,9 @@ var commands = map[string]struct {
 	"ready":         {RolePlayer, lobbyStates},
 	"buzz":          {RolePlayer, []string{stateInProgress}},
 	"answer":        {RolePlayer, []string{stateInProgress}},
+	"pick-theme":    {RolePlayer, []string{stateInProgress}},
+	"wager":         {RolePlayer, []string{stateInProgress}},
+	"use-joker":     {RolePlayer, []string{stateInProgress}},
 	"media-started": {RoleHost, []string{stateInProgress}},
 	"list-packs":    {RoleControl, nil},
 	"configure":     {RoleControl, lobbyStates},
@@ -225,6 +245,12 @@ func (r *Room) handle(e event) {
 		r.buzz(c, e.at)
 	case "answer":
 		r.answer(c, e.msg, e.at)
+	case "pick-theme":
+		r.pickTheme(c, e.msg)
+	case "wager":
+		r.wager(c, e.msg)
+	case "use-joker":
+		r.useJoker(c, e.msg)
 	case "media-started":
 		r.mediaStarted(c)
 	case "list-packs":

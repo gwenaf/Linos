@@ -123,22 +123,9 @@ func unsupported(m *pack.Manifest) error {
 		errs = append(errs, fmt.Errorf(format+": not supported yet", args...))
 	}
 
-	if t := m.Game.End.Type; t != "" && t != "rounds" {
-		fail("game.end.type %q", t)
-	}
-	if m.Game.Tiebreak.Type != "" {
-		fail("game.tiebreak")
-	}
 	checkRules("rules", m.Rules, fail)
 	for i, rd := range m.Rounds {
-		at := fmt.Sprintf("rounds[%d]", i)
-		if rd.Selection == "theme-pick" {
-			fail("%s.selection theme-pick", at)
-		}
-		if rd.Eliminate > 0 {
-			fail("%s.eliminate", at)
-		}
-		checkRules(at+".rules", rd.Rules, fail)
+		checkRules(fmt.Sprintf("rounds[%d].rules", i), rd.Rules, fail)
 	}
 	for i, t := range m.Tracks {
 		for j, g := range t.Guesses {
@@ -163,21 +150,12 @@ func checkRules(at string, r *pack.Rules, fail func(string, ...any)) {
 			fail("%s.answer.pauseOnBuzz false", at)
 		}
 	}
-	if o := r.Owner; o != nil && (o.HeadStart != nil && *o.HeadStart > 0 || o.Exclusive != nil && *o.Exclusive || o.OthersBonus != nil && *o.OthersBonus != 0) {
-		fail("%s.owner", at)
-	}
-	if j := r.Jokers; j != nil && j.Double != nil && *j.Double > 0 {
-		fail("%s.jokers", at)
-	}
 	checkScoring(at+".scoring", r.Scoring, fail)
 }
 
 func checkScoring(at string, s *pack.Scoring, fail func(string, ...any)) {
 	if s == nil {
 		return
-	}
-	if s.Type != nil && *s.Type == "wager" {
-		fail("%s.type %q", at, *s.Type)
 	}
 	if s.ReboundBonus != nil && *s.ReboundBonus != 0 {
 		fail("%s.reboundBonus", at)

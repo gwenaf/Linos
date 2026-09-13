@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey, scoreTable } from './ui'
+import { Answers, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -19,6 +19,11 @@ const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const elapsed = signal(0)
 const answeredBy = signal<string[]>([])
+const pick = signal<Data>(null)
+const wagerRequest = signal<Data>(null)
+const roundEnd = signal<Data>(null)
+const tiebreak = signal<string[] | null>(null)
+const banner = signal('')
 // Index of a track the server already started before this page joined: no media-started to send, seek instead.
 let startedBefore = -1
 
@@ -57,7 +62,37 @@ conn.on('state', (d) => {
   clockSince = clockRunning.value ? performance.now() : null
   elapsed.value = clockBase
   track.value = d.track ?? null
+  pick.value = d.pick ?? null
+  wagerRequest.value = d.wager ?? null
+  tiebreak.value = d.tiebreak?.map(unitName) ?? null
 })
+conn.on('theme-pick-request', (d) => {
+  pick.value = d
+  roundEnd.value = null
+  track.value = null
+})
+conn.on('theme-picked', (d) => {
+  pick.value = null
+  banner.value = `Thème ${d.theme}, choisi par ${unitName(d)}`
+})
+conn.on('wager-request', (d) => {
+  wagerRequest.value = d
+  roundEnd.value = null
+  track.value = null
+})
+conn.on('wagered', (d) => {
+  if (!wagerRequest.value) return
+  wagerRequest.value = {
+    limits: wagerRequest.value.limits.map((l: Data) => (unitName(l) === unitName(d) ? { ...l, placed: true } : l)),
+  }
+})
+conn.on('joker-used', (d) => (banner.value = `${unitName(d)} joue son joker : points doublés !`))
+conn.on('round-end', (d) => (roundEnd.value = d))
+conn.on('eliminated', (d) => {
+  if (d.units.length) banner.value = `Éliminé : ${d.units.map(unitName).join(', ')}`
+})
+conn.on('tiebreak', (d) => (tiebreak.value = d.units.map(unitName)))
+conn.on('head-start-over', () => (banner.value = 'À tous de jouer !'))
 conn.on('configured', (d) => (title.value = d.title))
 conn.on('game-start', (d) => {
   title.value = d.title
@@ -74,6 +109,9 @@ conn.on('track-start', (d) => {
   ended.value = null
   holder.value = null
   answeredBy.value = []
+  pick.value = null
+  wagerRequest.value = null
+  roundEnd.value = null
   track.value = d
 })
 conn.on('answered', (d) => {
@@ -109,7 +147,34 @@ export default function Host() {
   return (
     <main class="host">
       {paused.value && <div class="banner">Pause</div>}
-      {track.value ? <TrackView /> : <LobbyView />}
+      {banner.value && <p class="holder">{banner.value}</p>}
+      {tiebreak.value && <p class="holder">Mort subite : {tiebreak.value.join(' contre ')}</p>}
+      {roundEnd.value && <Results data={roundEnd.value} />}
+      {pick.value ? (
+        <section>
+          <h1>{unitName(pick.value.picker)} choisit un thème</h1>
+          <ul class="players">
+            {pick.value.themes.map((th: Data) => (
+              <li key={th.id}>{th.name}</li>
+            ))}
+          </ul>
+        </section>
+      ) : wagerRequest.value ? (
+        <section>
+          <h1>Les mises</h1>
+          <ul class="players">
+            {wagerRequest.value.limits.map((l: Data) => (
+              <li key={unitName(l)} class={l.placed ? 'ready' : ''}>
+                {unitName(l)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : track.value ? (
+        <TrackView />
+      ) : (
+        !roundEnd.value && <LobbyView />
+      )}
       <Scores scores={scores.value} />
     </main>
   )
@@ -190,6 +255,7 @@ function TrackView() {
         <span>
           Piste {t.index + 1} / {t.total}
         </span>
+        {t.owner && <span>Thème de {unitName(t.owner)}</span>}
         {live.value && !ended.value && <span class="countdown">{Math.max(0, Math.ceil(t.duration - elapsed.value))}</span>}
       </header>
       <div class="stage">

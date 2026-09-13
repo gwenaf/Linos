@@ -36,6 +36,9 @@ func (r *Room) startGame(c *Client) {
 			r.tolerated[p] = true
 		}
 	}
+	r.eliminated, r.tiebreak = map[any]bool{}, nil
+	r.jokersUsed = map[any]int{}
+	r.jokerLimit = defaultRules.with(r.manifest().Rules).doubleJokers
 	slog.Info("game started", "pack", r.loaded.Load().name, "tracks", len(playlist))
 	r.state = stateInProgress
 	r.playlist, r.current = playlist, -1
@@ -43,6 +46,7 @@ func (r *Room) startGame(c *Client) {
 		"title":   r.loaded.Load().pack.Manifest.Title,
 		"control": r.loaded.Load().control,
 		"tracks":  len(playlist),
+		"jokers":  r.jokerLimit,
 	}))
 	r.nextTrack()
 }
@@ -129,6 +133,7 @@ func (r *Room) endGame(reason string) {
 	r.turn++
 	r.trackSeq++
 	r.trackState = ""
+	r.owner, r.tiebreak = nil, nil
 	r.holder = nil
 	r.candidates = nil
 	r.buzzOpen = false

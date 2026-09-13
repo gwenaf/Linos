@@ -66,7 +66,10 @@ Exemples :
 - Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
 - Import de mp3 par glisser-déposer : manifest généré en mémoire, aucun fichier créé.
 - Déroulé : à `start-game`, les manches sont aplaties en liste de pistes (`sequence` dans l'ordre, `random` tiré parmi les thèmes sans rejouer une piste). Règles effectives d'une piste : valeurs par défaut, puis règles du pack, puis de la manche, puis barème de l'élément deviné.
-- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : manches `theme-pick`, élimination, fin au score ou par élimination, départage, plusieurs essais, rebond autre que `others`, `pauseOnBuzz` à faux, propriétaire du thème, jokers, barème `wager`, bonus de rebond.
+- Avant chaque piste, le serveur enchaîne : choix du thème (manches `theme-pick`, pistes tirées au moment du choix), puis mises (barème `wager`), puis la piste. `skip` abandonne ces étapes.
+- Un seul calcul de points pour le buzz et les réponses simultanées : barème (rapidité, fixe, rang, mise), bonus `othersBonus` pour une autre équipe que le propriétaire du thème, puis joker double sur les points positifs.
+- Fin de manche : `round-end`, puis éliminations (`eliminate`). Fin de partie : pistes épuisées (avec mort subite éventuelle), score cible atteint à la fin d'une piste, ou dernière équipe restante.
+- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : plusieurs essais par piste, rebond autre que `others`, `pauseOnBuzz` à faux, bonus de rebond. `wrongLockout` est ignoré tant qu'un seul essai est permis. Le manifest d'exemple est jouable (vérifié par un test).
 
 ### Builder (projet séparé)
 

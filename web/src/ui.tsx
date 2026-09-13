@@ -13,6 +13,11 @@ export function Qr({ url, caption }: { url: string; caption: string }) {
   )
 }
 
+/** Display label of a team or solo player payload ({team} or {name}). */
+export function unitName(d: Data): string {
+  return d.team ?? d.name
+}
+
 /** Keeps the latest score of each team or player; key is the display label. */
 export function scoreKey(d: Data): string {
   return d.team ?? d.name
@@ -41,7 +46,7 @@ export function Scores({ scores }: { scores: Record<string, number> }) {
 export function Results({ data }: { data: Data }) {
   return (
     <section class="results">
-      <h2>{data.reason === 'aborted' ? 'Partie annulée' : 'Résultats'}</h2>
+      <h2>{data.name ? `Fin de la manche ${data.name}` : data.reason === 'aborted' ? 'Partie annulée' : 'Résultats'}</h2>
       <ol>
         {data.results.map((r: Data) => (
           <li key={r.team ?? r.name}>

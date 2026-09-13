@@ -32,7 +32,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `join` (C → S) : rejoindre la partie. Contient `token` (jeton de session ou de maître du jeu) s'il existe, ou `invite` (code d'invitation maître du jeu). Un seul salon par serveur : aucun nom de salon. Invitation inconnue ou expirée : `error` `invalid-invite`.
 - `welcome` (S → C) : réponse à `join`. Contient le jeton (nouveau ou confirmé), le rôle attribué par le serveur, le pseudonyme éventuel et l'état de la partie (`state`).
 - `master-invite` (C → S, `control`) : créer une invitation maître du jeu. Le serveur répond `master-invite` avec `code` et `expiresIn` (secondes).
-- `state` (S → C) : état complet de la partie, envoyé juste après chaque `welcome`, adapté au rôle. Contient toujours `state`, `lobby` (comme `lobby-update`), `scores` (comme `results` de `game-end`) et `configured` si un pack est choisi. Pendant une partie, contient aussi `track` (comme `track-start` pour ce rôle), `trackState` (`loading`, `live`, `ended`), `found` (éléments trouvés), `round`, `paused` (comme `game-paused`), `holder` (comme `buzz-accepted`), `elapsed` (secondes de piste jouées, si `live`), `trackEnd` (comme `track-end`, si `ended`) et, pour un joueur, `canBuzz`, `canAnswer` et `answered` (éléments auxquels son équipe a déjà répondu, en mode simultané).
+- `state` (S → C) : état complet de la partie, envoyé juste après chaque `welcome`, adapté au rôle. Contient toujours `state`, `lobby` (comme `lobby-update`), `scores` (comme `results` de `game-end`) et `configured` si un pack est choisi. Pendant une partie, contient aussi `track` (comme `track-start` pour ce rôle), `trackState` (`loading`, `live`, `ended`), `found` (éléments trouvés), `round`, `paused` (comme `game-paused`), `holder` (comme `buzz-accepted`), `elapsed` (secondes de piste jouées, si `live`), `trackEnd` (comme `track-end`, si `ended`), `eliminated`, `tiebreak` (équipes du départage), `pick` (comme `theme-pick-request`, pendant un choix de thème, sans `track`), `wager` (comme `wager-request`, pendant les mises, sans `track`) et, pour un joueur, `jokers` (restants), `doubled`, `canBuzz`, `canAnswer` et `answered` (éléments auxquels son équipe a déjà répondu, en mode simultané).
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
 - `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe ; l'équipe est créée si elle n'existe pas (8 au maximum, noms comparés sans tenir compte de la casse). Un nom vide quitte l'équipe. Une équipe vide et sans points est supprimée.
@@ -48,7 +48,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 - `start-game` (C → S, `control`, en `ready`) : lancer la partie. Refusé (`no-host`) tant qu'aucun écran `host` n'est connecté. Remet les scores à zéro.
 - `end-game` (C → S, `control`) : terminer la partie manuellement.
-- `game-start` (S → C) : la partie commence. Contient `title`, `control` et `tracks` (nombre de pistes jouées). Refusé sans pack (`no-pack`) ou si les manches ne sélectionnent aucune piste (`empty-playlist`).
+- `game-start` (S → C) : la partie commence. Contient `title`, `control`, `tracks` (nombre de pistes prévues) et `jokers` (jokers double par équipe pour la partie). Refusé sans pack (`no-pack`) ou si les manches ne sélectionnent aucune piste (`empty-playlist`).
 - `pause` / `resume` (C → S, `control`) : mettre en pause ou reprendre la partie. `resume` est aussi accepté en pause technique : la partie continue sans les joueurs absents, tolérés jusqu'à leur retour. Sans écran `host`, `resume` laisse la partie en pause technique.
 - `game-paused` (S → C) : la partie est en pause. `reason` vaut `control` (commande `pause`) ou `technical`. En pause technique, contient aussi `hostMissing` et `missingPlayers` ; renvoyé à chaque changement de connexion. Pendant une pause, les buzz en attente sont annulés, le joueur qui a la main la garde et le chrono s'arrête.
 - `game-resumed` (S → C) : la partie reprend, automatiquement quand l'écran hôte et les joueurs absents sont revenus, ou sur `resume`.
@@ -60,15 +60,20 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 ### Manche
 
 - `round-start` (S → C) : début de manche, juste avant sa première piste. Contient `index` et `name`. Absent pour un pack sans manches.
-- `theme-pick-request` (S → C) : une équipe doit choisir un thème. Contient l'équipe et les thèmes disponibles.
-- `pick-theme` (C → S) : choix du thème par l'équipe désignée.
-- `theme-picked` (S → C) : thème choisi. L'équipe devient propriétaire de la piste qui suit.
-- `wager-request` (S → C) : les joueurs ou équipes doivent miser. Contient la mise maximale.
-- `wager` (C → S) : montant misé.
-- `use-joker` (C → S) : utiliser un joker avant la piste. Contient le type de joker.
-- `joker-used` (S → C) : un joker a été utilisé.
-- `eliminated` (S → C) : joueurs ou équipes éliminés.
-- `round-end` (S → C) : fin de manche. Contient le numéro et les résultats.
+Une « équipe » désigne ci-dessous une équipe (`team`) ou un joueur sans équipe (`name`).
+
+- `theme-pick-request` (S → C) : avant une piste d'une manche `theme-pick`, une équipe doit choisir un thème. Contient `picker` et `themes` (thèmes de la manche ayant encore une piste non jouée). Le choix tourne entre les équipes connectées, par ordre alphabétique. S'il ne reste aucun thème, la piste est sautée. Si l'équipe qui choisit est exclue, la suivante choisit.
+- `pick-theme` (C → S, `player`) : choix du thème (`theme` : identifiant) par un membre de l'équipe désignée (sinon `not-your-pick`). Thème absent ou épuisé : `unknown-theme`. Une piste non jouée de ce thème est tirée au sort. `control` peut passer le choix avec `skip`.
+- `theme-picked` (S → C) : thème choisi. Contient l'équipe et `theme`. L'équipe devient propriétaire de la piste qui suit : `track-start` contient `owner`, `headStart` et `exclusive`. Pendant l'avance (`owner.headStart`, en temps de piste joué), seul le propriétaire peut buzzer ou répondre ; avec `owner.exclusive`, lui seul joue la piste. Une autre équipe qui trouve gagne `owner.othersBonus` en plus.
+- `head-start-over` (S → C) : fin de l'avance du propriétaire ; le buzz s'ouvre aux autres équipes.
+- `wager-request` (S → C) : avant une piste au barème `wager`, chaque équipe doit miser. Contient `limits` : pour chaque équipe, `max` (son score, 0 au minimum) et `placed`. La piste démarre quand toutes les équipes connectées ont misé ; une équipe exclue n'est plus attendue. `control` peut passer la piste avec `skip`.
+- `wager` (C → S, `player`) : mise de son équipe. Contient `amount` (entre 0 et `max`, sinon `invalid-wager`) ; hors période de mise : `wrong-state`. Une bonne réponse rapporte la mise, une mauvaise la retire.
+- `wagered` (S → C) : une équipe a misé (sans le montant).
+- `use-joker` (C → S, `player`) : jouer un joker avant que la piste démarre (choix du thème, mises ou chargement ; sinon `wrong-state`). Contient `type` : seul `double` existe (`unknown-joker` sinon) ; il double les points positifs de l'équipe sur la piste. Nombre par partie : `rules.jokers.double` du pack ; une manche avec `jokers.double` à 0 les interdit. Plus de joker, ou piste déjà doublée : `no-joker`.
+- `joker-used` (S → C) : une équipe a joué un joker. Contient l'équipe et `type`.
+- `eliminated` (S → C) : fin d'une manche avec `eliminate` : les équipes les moins bien classées sont éliminées (égalité : ordre alphabétique ; au moins une équipe reste). Contient `units`. Une équipe éliminée ne peut plus buzzer ni répondre (`not-allowed`). Avec `game.end.type` `elimination`, la partie se termine quand il ne reste qu'une équipe.
+- `round-end` (S → C) : fin de manche. Contient `index`, `name` et `results` (comme `game-end`).
+- `tiebreak` (S → C) : les pistes sont épuisées et les premiers sont à égalité, avec `game.tiebreak.type` `sudden-death` : une piste de mort subite (tirée parmi `game.tiebreak.themes`, ou toutes les pistes non jouées) est ajoutée. Contient `units` ; les autres équipes ne peuvent pas jouer. Tant que l'égalité persiste et qu'il reste des pistes, une nouvelle mort subite suit.
 
 ### Piste
 
