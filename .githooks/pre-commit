@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+
+go_files=$(echo "$staged" | grep '\.go$' || true)
+if [ -n "$go_files" ]; then
+  unformatted=$(gofmt -l $go_files)
+  if [ -n "$unformatted" ]; then
+    echo "gofmt: fichiers non formatés :"
+    echo "$unformatted"
+    exit 1
+  fi
+  go vet ./...
+fi
+
+web_files=$(echo "$staged" | grep '^web/.*\.\(ts\|tsx\|vue\)$' || true)
+if [ -n "$web_files" ] && [ -d web/node_modules ]; then
+  (cd web && npm run --if-present lint && npm run --if-present typecheck)
+fi

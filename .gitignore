@@ -1,0 +1,20 @@
+# Go
+/bin/
+*.exe
+*.test
+*.out
+
+# Front
+web/node_modules/
+web/dist/
+
+# Env
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
