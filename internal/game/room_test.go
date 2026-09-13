@@ -175,8 +175,14 @@ func newControl(t *testing.T, r *Room) *testClient {
 // starts the game and plays the first track.
 func startGame(t *testing.T, r *Room, players ...*testClient) (ctrl, host *testClient) {
 	t.Helper()
+	return startGameWith(t, r, obj{"pack": "basic"}, players...)
+}
+
+// startGameWith is startGame with explicit configure data (pack and control).
+func startGameWith(t *testing.T, r *Room, configure obj, players ...*testClient) (ctrl, host *testClient) {
+	t.Helper()
 	ctrl = newControl(t, r)
-	send(r, ctrl, "configure", obj{"pack": "basic"})
+	send(r, ctrl, "configure", configure)
 	expect(t, ctrl, "configured", nil)
 	host = join(r, RoleHost, nil)
 	expect(t, host, "welcome", nil)

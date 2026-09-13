@@ -29,6 +29,10 @@ const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const joinUrls = signal<string[]>([])
 const inviteUrl = signal('')
+const controlMode = signal('master')
+// Answers typed on phones: the holder's pending answer (buzz mode) and everything answered (simultaneous mode).
+const holderAnswer = signal<Data>(null)
+const submissions = signal<Data[]>([])
 
 const network = signal<Data>(null)
 const showHelp = signal(false)
@@ -69,6 +73,7 @@ conn.on('state', (d) => {
   state.value = d.state
   lobby.value = d.lobby
   configured.value = d.configured ?? null
+  controlMode.value = d.configured?.control ?? controlMode.value
   round.value = d.round ?? null
   track.value = d.track ?? null
   trackEnded.value = d.trackState === 'ended'
@@ -85,7 +90,11 @@ conn.on('packs', (d) => {
   packs.value = d.packs
   packsDir.value = d.dir
 })
-conn.on('configured', (d) => (configured.value = d))
+conn.on('configured', (d) => {
+  configured.value = d
+  controlMode.value = d.control
+})
+conn.on('answer-submitted', (d) => (holderAnswer.value = d))
 conn.on('master-invite', (d) => {
   const base = joinUrls.value[0]?.replace(/\/play$/, '') ?? location.origin
   inviteUrl.value = `${base}/control?invite=${d.code}`
@@ -102,11 +111,18 @@ conn.on('track-start', (d) => {
   trackEnded.value = false
   found.value = []
   holder.value = null
+  holderAnswer.value = null
+  submissions.value = []
 })
-conn.on('buzz-accepted', (d) => (holder.value = d))
+conn.on('buzz-accepted', (d) => {
+  holder.value = d
+  holderAnswer.value = null
+})
 conn.on('answer-result', (d) => {
   holder.value = null
+  holderAnswer.value = null
   if (d.correct) found.value = [...found.value, d.guess]
+  if (d.value !== undefined) submissions.value = [...submissions.value, d]
 })
 conn.on('track-end', () => {
   trackEnded.value = true
@@ -187,6 +203,16 @@ function Lobby() {
       <section>
         <h2>Pack</h2>
         <button onClick={() => conn.send('list-packs')}>Actualiser</button>
+        <p>
+          <label>
+            <input type="radio" name="control" checked={controlMode.value === 'master'} onChange={() => (controlMode.value = 'master')} /> Maître du jeu : je
+            valide les réponses
+          </label>
+          <label>
+            <input type="radio" name="control" checked={controlMode.value === 'auto'} onChange={() => (controlMode.value = 'auto')} /> Automatique : réponses
+            sur les téléphones, validées par Linos
+          </label>
+        </p>
         {packs.value.length === 0 && (
           <p>
             Aucun pack trouvé dans <code>{packsDir.value}</code> : placez-y un dossier de pack ou un fichier .linospack, puis actualisez.
@@ -195,7 +221,7 @@ function Lobby() {
         <ul class="packs">
           {packs.value.map((p) => (
             <li key={p.name}>
-              <button disabled={!!p.error} class={configured.value?.pack === p.name ? 'selected' : ''} onClick={() => conn.send('configure', { pack: p.name })}>
+              <button disabled={!!p.error} class={configured.value?.pack === p.name ? 'selected' : ''} onClick={() => conn.send('configure', { pack: p.name, control: controlMode.value })}>
                 {p.title || p.name}
               </button>
               {p.error && <small class="error">{p.error}</small>}
@@ -301,17 +327,42 @@ function Game() {
                 <strong>{holder.value.name}</strong>
                 {holder.value.team && ` (${holder.value.team})`} a la main
               </p>
-              {t.guesses
-                .filter((g: Data) => !found.value.includes(g.label))
-                .map((g: Data) => (
-                  <button key={g.label} class="good" onClick={() => conn.send('validate', { correct: true, guess: g.label })}>
-                    Bonne réponse : {g.label}
+              {holderAnswer.value && (
+                <p>
+                  Réponse : <strong>{holderAnswer.value.value}</strong> ({holderAnswer.value.guess}, jugée {holderAnswer.value.correct ? 'correcte' : 'incorrecte'}{' '}
+                  par Linos)
+                </p>
+              )}
+              {configured.value?.control !== 'auto' && (
+                <>
+                  {t.guesses
+                    .filter((g: Data) => !found.value.includes(g.label))
+                    .map((g: Data) => (
+                      <button key={g.label} class="good" onClick={() => conn.send('validate', { correct: true, guess: g.label })}>
+                        Bonne réponse : {g.label}
+                      </button>
+                    ))}
+                  <button class="bad" onClick={() => conn.send('validate', { correct: false })}>
+                    Mauvaise réponse
                   </button>
-                ))}
-              <button class="bad" onClick={() => conn.send('validate', { correct: false })}>
-                Mauvaise réponse
-              </button>
+                </>
+              )}
             </div>
+          )}
+          {submissions.value.length > 0 && (
+            <table>
+              <tbody>
+                {submissions.value.map((s, i) => (
+                  <tr key={i}>
+                    <td>{s.team ?? s.name}</td>
+                    <td>{s.guess}</td>
+                    <td>{s.value}</td>
+                    <td>{s.correct ? 'Correct' : 'Faux'}</td>
+                    <td>{s.points}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
           <button class="primary" onClick={() => conn.send('skip')}>
             {trackEnded.value ? 'Piste suivante' : 'Passer la piste'}

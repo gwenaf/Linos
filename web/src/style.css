@@ -269,3 +269,20 @@ small {
 .help code {
   word-break: break-all;
 }
+
+.answer-form form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+.answer-form strong {
+  width: 100%;
+  text-align: left;
+}
+
+.control label {
+  display: block;
+}

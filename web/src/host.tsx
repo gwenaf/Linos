@@ -18,6 +18,7 @@ const paused = signal(false)
 const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const elapsed = signal(0)
+const answeredBy = signal<string[]>([])
 // Index of a track the server already started before this page joined: no media-started to send, seek instead.
 let startedBefore = -1
 
@@ -72,7 +73,12 @@ conn.on('track-start', (d) => {
   live.value = false
   ended.value = null
   holder.value = null
+  answeredBy.value = []
   track.value = d
+})
+conn.on('answered', (d) => {
+  const who = d.team ?? d.name
+  if (!answeredBy.value.includes(who)) answeredBy.value = [...answeredBy.value, who]
 })
 conn.on('timer-start', () => (live.value = true))
 conn.on('buzz-accepted', (d) => (holder.value = d))
@@ -196,12 +202,13 @@ function TrackView() {
       {holder.value && (
         <p class="holder">
           {holder.value.name}
-          {holder.value.team && ` (${holder.value.team})`} a la main !
+          {holder.value.team && ` (${holder.value.team})`} {t.via === 'device' ? 'répond sur son téléphone' : 'a la main !'}
         </p>
       )}
       {!ended.value && (
         <>
           <p class="guesses">À deviner : {t.guesses.map((g: Data) => g.label).join(', ')}</p>
+          {answeredBy.value.length > 0 && <p>Ont répondu : {answeredBy.value.join(', ')}</p>}
           {(t.hints ?? [])
             .filter((h: Data) => h.at <= elapsed.value)
             .map((h: Data) => (

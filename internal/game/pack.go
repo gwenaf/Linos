@@ -1,6 +1,7 @@
 package game
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -8,13 +9,16 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/gwenaf/linos/internal/pack"
 )
 
 type loadedPack struct {
-	name string
-	pack *pack.Pack
+	name    string
+	control string // master or auto
+	pack    *pack.Pack
 	// media lists the files the manifest references; only those are served.
 	media map[string]bool
 }
@@ -57,7 +61,8 @@ func (r *Room) listPacks(c *Client) {
 
 func (r *Room) configure(c *Client, m Message) {
 	var d struct {
-		Pack string `json:"pack"`
+		Pack    string `json:"pack"`
+		Control string `json:"control"`
 	}
 	if !r.decode(c, m, &d) {
 		return
@@ -66,9 +71,13 @@ func (r *Room) configure(c *Client, m Message) {
 		r.sendError(c, "invalid-pack", "pack must be a name from the packs folder")
 		return
 	}
+	control := d.Control
 	p, err := pack.Open(filepath.Join(r.packsDir, d.Pack))
 	if err == nil {
-		if err = unsupported(&p.Manifest); err != nil {
+		if control == "" {
+			control = cmp.Or(p.Manifest.Game.Control.Default, "master")
+		}
+		if err = errors.Join(unsupported(&p.Manifest), checkControl(&p.Manifest, control)); err != nil {
 			p.Close()
 		}
 	}
@@ -77,13 +86,13 @@ func (r *Room) configure(c *Client, m Message) {
 		r.sendError(c, "invalid-pack", err.Error())
 		return
 	}
-	slog.Info("pack configured", "pack", d.Pack, "title", p.Manifest.Title)
+	slog.Info("pack configured", "pack", d.Pack, "title", p.Manifest.Title, "control", control)
 
 	media := map[string]bool{p.Manifest.Cover: true}
 	for _, t := range p.Manifest.Tracks {
 		media[t.Media] = true
 	}
-	if old := r.loaded.Swap(&loadedPack{name: d.Pack, pack: p, media: media}); old != nil {
+	if old := r.loaded.Swap(&loadedPack{name: d.Pack, control: control, pack: p, media: media}); old != nil {
 		// ponytail: a media download still streaming from the old pack is cut; reconfiguring only happens in the lobby.
 		old.pack.Close()
 	}
@@ -98,11 +107,12 @@ func (r *Room) configuredPayload() map[string]any {
 		rounds = append(rounds, rd.Name)
 	}
 	return map[string]any{
-		"pack":   lp.name,
-		"title":  lp.pack.Manifest.Title,
-		"author": lp.pack.Manifest.Author,
-		"rounds": rounds,
-		"tracks": len(lp.pack.Manifest.Tracks),
+		"pack":    lp.name,
+		"control": lp.control,
+		"title":   lp.pack.Manifest.Title,
+		"author":  lp.pack.Manifest.Author,
+		"rounds":  rounds,
+		"tracks":  len(lp.pack.Manifest.Tracks),
 	}
 }
 
@@ -143,12 +153,6 @@ func checkRules(at string, r *pack.Rules, fail func(string, ...any)) {
 		return
 	}
 	if a := r.Answer; a != nil {
-		if a.Mode != nil && *a.Mode != "buzz" {
-			fail("%s.answer.mode %q", at, *a.Mode)
-		}
-		if a.Via != nil && *a.Via != "oral" {
-			fail("%s.answer.via %q", at, *a.Via)
-		}
 		if a.Attempts != nil && *a.Attempts != 1 {
 			fail("%s.answer.attempts %d", at, *a.Attempts)
 		}
@@ -172,10 +176,41 @@ func checkScoring(at string, s *pack.Scoring, fail func(string, ...any)) {
 	if s == nil {
 		return
 	}
-	if s.Type != nil && *s.Type != "speed" && *s.Type != "fixed" {
+	if s.Type != nil && *s.Type == "wager" {
 		fail("%s.type %q", at, *s.Type)
 	}
 	if s.ReboundBonus != nil && *s.ReboundBonus != 0 {
 		fail("%s.reboundBonus", at)
 	}
+}
+
+// checkControl refuses the control and answer combinations that cannot be played.
+func checkControl(m *pack.Manifest, control string) error {
+	if control != "master" && control != "auto" {
+		return fmt.Errorf("control %q must be master or auto", control)
+	}
+	if allowed := m.Game.Control.Allowed; len(allowed) > 0 && !slices.Contains(allowed, control) {
+		return fmt.Errorf("control %q is not allowed by this pack (allowed: %s)", control, strings.Join(allowed, ", "))
+	}
+	base := defaultRules.with(m.Rules)
+	played := map[string]rules{"rules": base}
+	if len(m.Rounds) > 0 {
+		played = map[string]rules{}
+		for i, rd := range m.Rounds {
+			played[fmt.Sprintf("rounds[%d]", i)] = base.with(rd.Rules)
+		}
+	}
+	var errs []error
+	for at, r := range played {
+		if r.mode == "simultaneous" && r.via == "oral" {
+			errs = append(errs, fmt.Errorf("%s: simultaneous answers must be given on the phones (answer.via device)", at))
+		}
+		if control == "auto" && r.via == "oral" {
+			errs = append(errs, fmt.Errorf("%s: oral answers need a gamemaster (control master)", at))
+		}
+		if r.scoringType == "rank" && r.mode != "simultaneous" {
+			errs = append(errs, fmt.Errorf("%s: rank scoring needs simultaneous answers", at))
+		}
+	}
+	return errors.Join(errs...)
 }

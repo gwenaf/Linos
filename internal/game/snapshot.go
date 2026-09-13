@@ -45,6 +45,15 @@ func (r *Room) snapshot(c *Client) map[string]any {
 	}
 	if p := c.player; p != nil {
 		s["canBuzz"] = r.state == stateInProgress && r.buzzOpen && p.name != "" && !r.attempted[unit(p)]
+		answered := []string{}
+		for _, g := range r.track().Guesses {
+			if r.answered[g.Label][unit(p)] {
+				answered = append(answered, g.Label)
+			}
+		}
+		s["answered"] = answered
+		s["canAnswer"] = r.state == stateInProgress && r.trackState == trackLive && r.rules.via == "device" &&
+			(r.rules.mode == "simultaneous" || r.holder == p && !r.holderAnswered)
 	}
 	return s
 }

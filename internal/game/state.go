@@ -40,8 +40,9 @@ func (r *Room) startGame(c *Client) {
 	r.state = stateInProgress
 	r.playlist, r.current = playlist, -1
 	r.broadcast(NewMessage("game-start", map[string]any{
-		"title":  r.loaded.Load().pack.Manifest.Title,
-		"tracks": len(playlist),
+		"title":   r.loaded.Load().pack.Manifest.Title,
+		"control": r.loaded.Load().control,
+		"tracks":  len(playlist),
 	}))
 	r.nextTrack()
 }

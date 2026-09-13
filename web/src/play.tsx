@@ -18,6 +18,14 @@ const feedback = signal('')
 const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const kicked = signal(false)
+// Phone answers: whether the track clock runs, the guesses this phone no longer answers
+// (answered in simultaneous mode, found in buzz mode) and whether the holder already sent an answer.
+const live = signal(false)
+const done = signal<string[]>([])
+const sent = signal(false)
+let liveSince = 0
+const tick = signal(0)
+setInterval(() => tick.value++, 500)
 
 conn.on('welcome', (d) => {
   store(TOKEN, d.token)
@@ -33,6 +41,10 @@ conn.on('state', (d) => {
   canBuzz.value = !!d.canBuzz
   paused.value = !!d.paused
   scores.value = scoreTable(d.scores)
+  live.value = d.trackState === 'live'
+  liveSince = performance.now() - (d.elapsed ?? 0) * 1000
+  done.value = (d.track?.mode === 'simultaneous' ? d.answered : d.found) ?? []
+  sent.value = !!d.holder && !d.canAnswer
 })
 conn.on('lobby-update', (d) => {
   lobby.value = d
@@ -54,22 +66,33 @@ conn.on('track-start', (d) => {
   holder.value = null
   canBuzz.value = false
   feedback.value = ''
+  live.value = false
+  done.value = []
+  sent.value = false
+})
+conn.on('timer-start', () => {
+  live.value = true
+  liveSince = performance.now()
 })
 conn.on('buzz-available', () => (canBuzz.value = true))
 conn.on('buzz-blocked', () => (canBuzz.value = false))
 conn.on('buzz-accepted', (d) => {
   holder.value = d
   canBuzz.value = false
+  sent.value = false
   if (d.name === me.value) navigator.vibrate?.(300)
 })
 conn.on('answer-result', (d) => {
   holder.value = null
+  const simultaneous = track.value?.mode === 'simultaneous'
+  if (d.correct || simultaneous) done.value = [...done.value, d.guess]
   if (d.name === me.value) feedback.value = d.correct ? `Bravo ! +${d.points}` : 'Raté…'
 })
 conn.on('track-end', (d) => {
   ended.value = d
   holder.value = null
   canBuzz.value = false
+  live.value = false
 })
 conn.on('game-paused', () => {
   paused.value = true
@@ -163,6 +186,8 @@ function Game() {
   const mine = lobby.value.players.find((p: Data) => p.name === me.value)
   const score = scores.value[mine?.team || me.value] ?? 0
   const mineHolds = holder.value?.name === me.value
+  const simultaneous = t?.mode === 'simultaneous'
+  const canAnswer = t && live.value && !paused.value && t.via === 'device' && (simultaneous || (mineHolds && !sent.value))
   return (
     <>
       <header class="track">
@@ -175,19 +200,70 @@ function Game() {
           Piste {t.index + 1} / {t.total} — à deviner : {t.guesses.map((g: Data) => g.label).join(', ')}
         </p>
       )}
-      {t?.guesses
-        .filter((g: Data) => g.choices)
+      {t?.via !== 'device' &&
+        t?.guesses
+          .filter((g: Data) => g.choices)
         .map((g: Data) => (
           <p key={g.label}>
             {g.label} : {g.choices.join(' · ')}
           </p>
         ))}
-      {holder.value && <p class="holder">{mineHolds ? 'À vous ! Répondez à voix haute.' : `${holder.value.name} a la main`}</p>}
+      {holder.value && (
+        <p class="holder">
+          {mineHolds ? (t?.via === 'device' ? 'À vous ! Répondez ci-dessous.' : 'À vous ! Répondez à voix haute.') : `${holder.value.name} a la main`}
+        </p>
+      )}
       {feedback.value && <p class="feedback">{feedback.value}</p>}
-      <button class="buzz" disabled={!canBuzz.value} onPointerDown={() => conn.send('buzz')}>
-        BUZZ
-      </button>
+      {canAnswer && <AnswerForm />}
+      {simultaneous && live.value && !canAnswer && <p>Réponses envoyées, en attente de la fin de la piste.</p>}
+      {!simultaneous && (
+        <button class="buzz" disabled={!canBuzz.value} onPointerDown={() => conn.send('buzz')}>
+          BUZZ
+        </button>
+      )}
       {ended.value && <Answers guesses={ended.value.guesses} />}
     </>
+  )
+}
+
+function AnswerForm() {
+  const t = track.value
+  void tick.value // re-render so choices appear at choicesAt
+  // ponytail: choicesAt counts from timer-start without pauses; good enough for showing buttons.
+  const played = (performance.now() - liveSince) / 1000
+  const guesses = t.guesses.filter((g: Data) => !done.value.includes(g.label))
+  const submit = (guess: string, value: string) => {
+    conn.send('answer', { guess, value })
+    if (t.mode !== 'simultaneous') sent.value = true
+  }
+  if (t.mode === 'simultaneous' && guesses.length === 0) return null
+  return (
+    <div class="answer-form">
+      {guesses.map((g: Data) => (
+        <form
+          key={g.label}
+          onSubmit={(e) => {
+            e.preventDefault()
+            submit(g.label, new FormData(e.target as HTMLFormElement).get('value') as string)
+          }}
+        >
+          <strong>{g.label}</strong>
+          {g.type !== 'choice' ? (
+            <>
+              <input name="value" inputMode={g.type === 'number' ? 'decimal' : 'text'} autoComplete="off" required />
+              <button class="primary">Valider</button>
+            </>
+          ) : played >= (g.choicesAt ?? 0) ? (
+            g.choices.map((c: string) => (
+              <button type="button" key={c} onClick={() => submit(g.label, c)}>
+                {c}
+              </button>
+            ))
+          ) : (
+            <small>Choix dans {Math.ceil(g.choicesAt - played)} s</small>
+          )}
+        </form>
+      ))}
+    </div>
   )
 }

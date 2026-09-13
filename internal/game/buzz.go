@@ -17,6 +17,10 @@ func (r *Room) buzz(c *Client, at time.Time) {
 		r.sendError(c, "not-identified", "identify first")
 		return
 	}
+	if r.rules.mode == "simultaneous" {
+		r.sendError(c, "no-buzz", "everyone answers on their phone for this track")
+		return
+	}
 	u := unit(p)
 	if !r.buzzOpen || r.attempted[u] || slices.ContainsFunc(r.candidates, func(q *player) bool { return unit(q) == u }) {
 		return
@@ -41,6 +45,7 @@ func (r *Room) closeBuzzWindow() {
 	r.candidates = nil
 	r.buzzOpen = false
 	r.holder = winner
+	r.holderAnswered = false
 	r.attempted[unit(winner)] = true
 	r.turn++
 	// Candidates tied inside the window share the first buzz time; the clock stops while the holder answers.
@@ -63,6 +68,10 @@ func (r *Room) armAnswerTimer() {
 }
 
 func (r *Room) validate(c *Client, m Message) {
+	if r.loaded.Load().control == "auto" {
+		r.sendError(c, "auto-control", "answers are validated automatically in this game")
+		return
+	}
 	if r.holder == nil {
 		r.sendError(c, "no-pending-answer", "no answer to validate")
 		return

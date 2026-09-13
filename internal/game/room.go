@@ -82,6 +82,12 @@ type Room struct {
 	trackState string
 	found      map[string]bool
 	endReason  string
+	// Answers on phones: who answered which guess in simultaneous mode, how many got each right (rank scoring),
+	// points revealed at the end of the track, and whether the buzz holder already sent an answer.
+	answered       map[string]map[any]bool
+	correctCount   map[string]int
+	pendingPoints  []scored
+	holderAnswered bool
 	// trackSeq invalidates track timers from previous tracks.
 	trackSeq int
 
@@ -165,6 +171,7 @@ var commands = map[string]struct {
 	"join-team":     {RolePlayer, lobbyStates},
 	"ready":         {RolePlayer, lobbyStates},
 	"buzz":          {RolePlayer, []string{stateInProgress}},
+	"answer":        {RolePlayer, []string{stateInProgress}},
 	"media-started": {RoleHost, []string{stateInProgress}},
 	"list-packs":    {RoleControl, nil},
 	"configure":     {RoleControl, lobbyStates},
@@ -216,6 +223,8 @@ func (r *Room) handle(e event) {
 		r.setReady(c, e.msg)
 	case "buzz":
 		r.buzz(c, e.at)
+	case "answer":
+		r.answer(c, e.msg, e.at)
 	case "media-started":
 		r.mediaStarted(c)
 	case "list-packs":

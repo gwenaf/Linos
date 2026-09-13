@@ -21,15 +21,23 @@ const (
 type rules struct {
 	duration     time.Duration
 	answerTime   time.Duration
+	mode         string // buzz or simultaneous
+	via          string // oral or device
+	fuzziness    float64
 	scoringType  string
 	max, min     int
+	ranks        []int
 	wrongPenalty int
 }
 
 var defaultRules = rules{
 	duration:    30 * time.Second,
 	answerTime:  10 * time.Second,
+	mode:        "buzz",
+	via:         "oral",
+	fuzziness:   0.2,
 	scoringType: "speed",
+	ranks:       []int{100, 60, 30},
 	max:         100,
 	min:         20,
 }
@@ -41,8 +49,19 @@ func (r rules) with(p *pack.Rules) rules {
 	if p.Duration != nil {
 		r.duration = seconds(*p.Duration)
 	}
-	if p.Answer != nil && p.Answer.AnswerTime != nil {
-		r.answerTime = seconds(*p.Answer.AnswerTime)
+	if a := p.Answer; a != nil {
+		if a.AnswerTime != nil {
+			r.answerTime = seconds(*a.AnswerTime)
+		}
+		if a.Mode != nil {
+			r.mode = *a.Mode
+		}
+		if a.Via != nil {
+			r.via = *a.Via
+		}
+		if a.Fuzziness != nil {
+			r.fuzziness = *a.Fuzziness
+		}
 	}
 	if p.Scoring != nil {
 		r = r.withScoring(p.Scoring)
@@ -62,6 +81,9 @@ func (r rules) withScoring(s *pack.Scoring) rules {
 	}
 	if s.WrongPenalty != nil {
 		r.wrongPenalty = *s.WrongPenalty
+	}
+	if len(s.Ranks) > 0 {
+		r.ranks = s.Ranks
 	}
 	return r
 }
@@ -141,6 +163,9 @@ func (r *Room) nextTrack() {
 	r.trackSeq++
 	r.trackState = trackLoading
 	r.found = map[string]bool{}
+	r.answered = map[string]map[any]bool{}
+	r.correctCount = map[string]int{}
+	r.pendingPoints = nil
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false
 	r.attempted = map[any]bool{}
 	r.turn++
@@ -174,6 +199,8 @@ func (r *Room) trackPayload(role string) map[string]any {
 		"round":    it.round,
 		"duration": it.rules.duration.Seconds(),
 		"guesses":  guesses,
+		"mode":     it.rules.mode,
+		"via":      it.rules.via,
 	}
 	rate := t.PlaybackRate
 	if rate == 0 {
@@ -213,7 +240,9 @@ func (r *Room) mediaStarted(c *Client) {
 	r.trackStart = time.Now()
 	r.paused = 0
 	r.broadcast(NewMessage("timer-start", map[string]any{"index": r.current, "duration": r.rules.duration.Seconds()}))
-	r.openBuzz()
+	if r.rules.mode == "buzz" {
+		r.openBuzz()
+	}
 	r.armTrackTimer()
 }
 
@@ -250,6 +279,12 @@ func (r *Room) endTrack(reason string) {
 	r.turn++
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false
 	r.broadcast(NewMessage("track-end", r.trackEndPayload()))
+	for _, s := range r.pendingPoints {
+		if s.points != 0 {
+			r.addPoints(s.player, s.points)
+		}
+	}
+	r.pendingPoints = nil
 }
 
 func (r *Room) trackEndPayload() map[string]any {

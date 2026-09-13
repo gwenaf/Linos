@@ -14,12 +14,14 @@ Décisions techniques prises. Les specs fonctionnelles sont dans `SPECS.md`, le 
 
 ## 2. Validation des réponses
 
-1. **Normalisation** de la réponse et des réponses acceptées : minuscules, suppression des accents (`golang.org/x/text/unicode/norm`), suppression de la ponctuation, espaces fusionnés.
+1. **Normalisation** de la réponse et des réponses acceptées : minuscules, suppression des accents (`golang.org/x/text`), ponctuation supprimée sans espace (« AC/DC » devient « acdc », « a-ha » devient « aha »), espaces fusionnés.
 2. **Comparaison** par distance de Levenshtein (implémentation locale, sans dépendance).
 3. La réponse est acceptée si `distance / longueur ≤ fuzziness`. Valeur par défaut : 0,2, réglable via `answer.fuzziness`.
 4. Aucune erreur tolérée pour les réponses de moins de 4 caractères.
 5. Type `number` : acceptée si l'écart avec la bonne réponse est inférieur ou égal à `tolerance`.
-6. En contrôle `master`, le maître du jeu peut toujours corriger une validation.
+6. Type `choice` : la valeur normalisée doit égaler la réponse normalisée.
+7. En contrôle `master` avec réponses sur téléphone, le verdict de Linos n'est qu'une suggestion : le maître du jeu valide. En contrôle `auto`, il est appliqué directement ; le maître du jeu peut toujours corriger un score.
+8. Réponses simultanées : points calculés à la réception (rapidité selon le temps de piste joué, rang selon l'ordre des bonnes réponses, au-delà de `ranks` : 0) mais appliqués en fin de piste.
 
 Exemples :
 
@@ -64,7 +66,7 @@ Exemples :
 - Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
 - Import de mp3 par glisser-déposer : manifest généré en mémoire, aucun fichier créé.
 - Déroulé : à `start-game`, les manches sont aplaties en liste de pistes (`sequence` dans l'ordre, `random` tiré parmi les thèmes sans rejouer une piste). Règles effectives d'une piste : valeurs par défaut, puis règles du pack, puis de la manche, puis barème de l'élément deviné.
-- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : manches `theme-pick`, élimination, fin au score ou par élimination, départage, réponses simultanées ou sur l'appareil, plusieurs essais, rebond autre que `others`, `pauseOnBuzz` à faux, propriétaire du thème, jokers, barèmes `rank` et `wager`, bonus de rebond.
+- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : manches `theme-pick`, élimination, fin au score ou par élimination, départage, plusieurs essais, rebond autre que `others`, `pauseOnBuzz` à faux, propriétaire du thème, jokers, barème `wager`, bonus de rebond.
 
 ### Builder (projet séparé)
 
