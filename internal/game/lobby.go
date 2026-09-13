@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -17,6 +18,7 @@ type player struct {
 	token  string
 	name   string
 	score  int
+	ready  bool
 	team   *team
 	client *Client
 }
@@ -34,27 +36,21 @@ func unit(p *player) any {
 	return p
 }
 
-func (r *Room) joinPlayer(c *Client, m Message) bool {
-	var d struct {
-		Token string `json:"token"`
-	}
-	if !r.decode(c, m, &d) {
-		return false
-	}
-	p := r.players[d.Token]
+func (r *Room) joinPlayer(c *Client, token string) {
+	p := r.players[token]
 	if p == nil {
 		p = &player{token: newToken()}
 		r.players[p.token] = p
 	}
-	if c.player != nil && c.player != p && c.player.client == c {
-		c.player.client = nil
+	if c.player != p {
+		r.detach(c)
 	}
-	if p.client != nil && p.client != c {
-		r.drop(p.client)
+	old := p.client
+	p.client, c.player = c, p
+	delete(r.tolerated, p)
+	if old != nil && old != c {
+		r.drop(old)
 	}
-	p.client = c
-	c.player = p
-	return true
 }
 
 func (r *Room) identify(c *Client, m Message) {
@@ -100,36 +96,111 @@ func (r *Room) joinTeam(c *Client, m Message) {
 			r.teams = append(r.teams, t)
 		}
 	}
-	old := c.player.team
-	c.player.team = t
-	if old != nil && old != t && old.score == 0 && !r.hasMembers(old) {
-		r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == old })
-	}
+	r.setTeam(c.player, t)
 	r.broadcastLobby()
 }
 
+// setTeam moves a player and deletes the team it left when that team is empty and has no points.
+func (r *Room) setTeam(p *player, t *team) {
+	old := p.team
+	p.team = t
+	if old != nil && old != t && old.score == 0 && !r.hasMembers(old) {
+		r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == old })
+	}
+}
+
+func (r *Room) setReady(c *Client, m Message) {
+	var d struct {
+		Ready *bool `json:"ready"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	if d.Ready == nil {
+		r.sendError(c, "bad-data", "ready requires ready")
+		return
+	}
+	if c.player.name == "" {
+		r.sendError(c, "not-identified", "identify first")
+		return
+	}
+	c.player.ready = *d.Ready
+	r.broadcastLobby()
+}
+
+func (r *Room) kick(c *Client, m Message) {
+	var d struct {
+		Name string `json:"name"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	p := r.playerByName(d.Name)
+	if p == nil {
+		r.sendError(c, "unknown-player", "no player named "+d.Name)
+		return
+	}
+	r.broadcast(NewMessage("kicked", map[string]string{"name": p.name}))
+	delete(r.players, p.token)
+	delete(r.tolerated, p)
+	r.setTeam(p, nil)
+	r.candidates = slices.DeleteFunc(r.candidates, func(q *player) bool { return q == p })
+	if r.holder == p {
+		r.holder = nil
+		r.turn++
+		r.startClock()
+		r.openBuzz()
+	}
+	if p.client != nil {
+		r.drop(p.client)
+		return
+	}
+	r.connectionsChanged()
+}
+
+func (r *Room) createInvite(c *Client) {
+	code := newToken()
+	r.invites[code] = time.Now().Add(r.inviteTTL)
+	r.send(c, NewMessage("master-invite", map[string]any{"code": code, "expiresIn": r.inviteTTL.Seconds()}))
+}
+
+// broadcastLobby sends players and teams; in the lobby it also switches between lobby and ready.
 func (r *Room) broadcastLobby() {
 	type entry struct {
-		Name string `json:"name"`
-		Team string `json:"team,omitempty"`
+		Name      string `json:"name"`
+		Team      string `json:"team,omitempty"`
+		Ready     bool   `json:"ready"`
+		Connected bool   `json:"connected"`
 	}
 	players := []entry{}
+	connected, allReady := 0, true
 	for _, p := range r.players {
 		if p.name == "" {
 			continue
 		}
-		e := entry{Name: p.name}
+		e := entry{Name: p.name, Ready: p.ready, Connected: p.client != nil}
 		if p.team != nil {
 			e.Team = p.team.name
+		}
+		if e.Connected {
+			connected++
+			allReady = allReady && p.ready
 		}
 		players = append(players, e)
 	}
 	slices.SortFunc(players, func(a, b entry) int { return strings.Compare(a.Name, b.Name) })
+
+	if slices.Contains(lobbyStates, r.state) {
+		r.state = stateLobby
+		if connected > 0 && allReady {
+			r.state = stateReady
+		}
+	}
 	teams := []string{}
 	for _, t := range r.teams {
 		teams = append(teams, t.name)
 	}
-	r.broadcast(NewMessage("lobby-update", map[string]any{"players": players, "teams": teams}))
+	r.broadcast(NewMessage("lobby-update", map[string]any{"players": players, "teams": teams, "state": r.state}))
 }
 
 func (r *Room) validName(c *Client, raw string) (string, bool) {

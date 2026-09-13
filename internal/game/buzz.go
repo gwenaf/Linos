@@ -6,10 +6,7 @@ import (
 	"time"
 )
 
-const (
-	buzzWindow = 30 * time.Millisecond
-	answerTime = 10 * time.Second
-)
+const buzzWindow = 30 * time.Millisecond
 
 func (r *Room) buzz(c *Client, at time.Time) {
 	p := c.player
@@ -46,7 +43,7 @@ func (r *Room) closeBuzzWindow() {
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
 	r.stopClock()
 
-	accepted := map[string]any{"name": winner.name, "answerTime": answerTime.Seconds()}
+	accepted := map[string]any{"name": winner.name, "answerTime": r.answerTime.Seconds()}
 	if winner.team != nil {
 		accepted["team"] = winner.team.name
 	}
@@ -62,7 +59,7 @@ func (r *Room) closeBuzzWindow() {
 
 func (r *Room) armAnswerTimer() {
 	turn := r.turn
-	time.AfterFunc(answerTime, func() { r.events <- event{kind: evAnswerTimeout, turn: turn} })
+	time.AfterFunc(r.answerTime, func() { r.events <- event{kind: evAnswerTimeout, turn: turn} })
 }
 
 func (r *Room) validate(c *Client, m Message) {

@@ -17,7 +17,7 @@ func Handler(room *game.Room) http.Handler {
 		case "", game.RolePlayer:
 		case game.RoleControl, game.RoleHost:
 			if !isLocal(req) {
-				http.Error(w, "role reserved to the host machine", http.StatusForbidden)
+				http.Error(w, "role reserved to the host machine; use a gamemaster invite", http.StatusForbidden)
 				return
 			}
 			role = q
@@ -36,11 +36,9 @@ func Handler(room *game.Room) http.Handler {
 		c := room.Connect(role)
 
 		go func() {
+			// Write errors surface as a read error below, which disconnects the client.
 			for m := range c.Messages() {
-				if err := wsjson.Write(ctx, conn, m); err != nil {
-					conn.CloseNow()
-					return
-				}
+				wsjson.Write(ctx, conn, m)
 			}
 			conn.Close(websocket.StatusNormalClosure, "")
 		}()

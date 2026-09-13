@@ -19,6 +19,7 @@ Le binaire sert trois pages. Le rôle d'une connexion découle de la page et de 
 - `/play` → rôle `player` : joueur sur téléphone. Il buzze, répond, choisit un thème, utilise un joker et mise.
 - La page demande son rôle à la connexion : `/ws?role=control` ou `/ws?role=host` ; sans paramètre, le rôle est `player`.
 - Les rôles `control` et `host` ne sont accordés qu'aux connexions provenant de la machine hôte : adresse de bouclage **et** en-tête `Host` local (protection contre le DNS rebinding). Sinon la connexion est refusée (HTTP 403).
+- **Téléphone maître du jeu** : pour jouer avec un seul écran (`/host` en plein écran sur le PC), `control` crée une invitation (`master-invite`) affichée en QR code. Le téléphone se connecte sans paramètre de rôle et envoie `join` avec `invite` : il obtient le rôle `control` et un jeton de maître du jeu. L'invitation est à usage unique et expire après 2 minutes ; le jeton permet ensuite de se reconnecter.
 - Messages réservés : `identify`, `buzz` → `player` ; `validate`, `skip` et autres commandes de pilotage → `control`. Un message hors rôle reçoit `error` avec le code `forbidden`.
 - En partie par équipes, les points sont comptés par équipe. Un buzz ou une réponse d'un membre engage toute l'équipe.
 
@@ -28,32 +29,30 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 ### Connexion et lobby
 
-- `join` (C → S) : rejoindre la partie. Contient le jeton de session s'il existe. Un seul salon par serveur : aucun nom de salon.
-- `welcome` (S → C) : réponse à `join`. Contient le jeton de session (nouveau ou confirmé), le rôle attribué par le serveur et l'état de la partie (`state`).
+- `join` (C → S) : rejoindre la partie. Contient `token` (jeton de session ou de maître du jeu) s'il existe, ou `invite` (code d'invitation maître du jeu). Un seul salon par serveur : aucun nom de salon. Invitation inconnue ou expirée : `error` `invalid-invite`.
+- `welcome` (S → C) : réponse à `join`. Contient le jeton (nouveau ou confirmé), le rôle attribué par le serveur, le pseudonyme éventuel et l'état de la partie (`state`).
+- `master-invite` (C → S, `control`) : créer une invitation maître du jeu. Le serveur répond `master-invite` avec `code` et `expiresIn` (secondes).
 - `state` (S → C) : état complet de la partie. Envoyé après une reconnexion ou sur demande.
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
 - `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe ; l'équipe est créée si elle n'existe pas (8 au maximum, noms comparés sans tenir compte de la casse). Un nom vide quitte l'équipe. Une équipe vide et sans points est supprimée.
-- `lobby-update` (S → C) : `players` (pseudonyme et équipe de chacun) et `teams` (noms des équipes). Statut prêt/pas prêt à venir.
+- `lobby-update` (S → C) : `players` (pour chacun : `name`, `team`, `ready`, `connected`), `teams` (noms des équipes) et `state`. Envoyé à chaque changement de joueur, d'équipe, de statut prêt ou de connexion.
 - `configure` (C → S, `control`) : choisir le pack, la validation (`master` : par la page `control`, ou `auto`) et les règles modifiées pour cette partie.
-- `kick` (C → S, `control`) : demander l'expulsion d'un joueur.
-- `kicked` (S → C) : un joueur a été expulsé.
-- `auto-ready-check` (S → C) : le serveur vérifie que tous les clients sont prêts à commencer ou continuer.
-  - Un client qui n'est pas prêt répond `not-ready`.
-  - Si tous les clients sont prêts, la partie peut commencer ou reprendre.
-  - Si un client n'est pas joignable, l'écran hôte affiche le joueur déconnecté avec un QR code de reconnexion (vérifié avec le jeton de session).
-- `ready` / `not-ready` (C → S) : le joueur signale qu'il est prêt ou non.
+- `kick` (C → S, `control`) : expulser un joueur, dans tout état. Contient `name`. Le joueur est retiré (son jeton ne vaut plus rien), son équipe le perd, et s'il avait la main le buzz se rouvre.
+- `kicked` (S → C) : un joueur a été expulsé. Contient `name`. Le téléphone expulsé reçoit le message puis sa connexion est fermée.
+- `ready` (C → S, `player`, en `lobby` ou `ready`) : le joueur signale qu'il est prêt ou non. Contient `ready` (vrai ou faux, obligatoire). Réservé aux joueurs identifiés.
 - `error` (S → C) : erreur. Contient un code et un message. Un message envoyé dans un état où il n'est pas accepté reçoit le code `wrong-state`.
 
 ### Partie
 
-- `start-game` (C → S, `control`) : lancer la partie. Refusé (`no-host`) tant qu'aucun écran `host` n'est connecté.
+- `start-game` (C → S, `control`, en `ready`) : lancer la partie. Refusé (`no-host`) tant qu'aucun écran `host` n'est connecté. Remet les scores à zéro.
 - `end-game` (C → S, `control`) : terminer la partie manuellement.
 - `game-start` (S → C) : la partie commence. Contient les paramètres de la partie et les règles effectives.
-- `pause` / `resume` (C → S, `control`) : mettre en pause ou reprendre la partie.
-- `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Motif `control` (commande `pause`) ou `technical` : le dernier écran `host` s'est déconnecté. La partie reprend automatiquement quand un écran `host` se reconnecte. Pendant la pause, les buzz en attente sont annulés, le joueur qui a la main la garde et le chrono s'arrête.
+- `pause` / `resume` (C → S, `control`) : mettre en pause ou reprendre la partie. `resume` est aussi accepté en pause technique : la partie continue sans les joueurs absents, tolérés jusqu'à leur retour. Sans écran `host`, `resume` laisse la partie en pause technique.
+- `game-paused` (S → C) : la partie est en pause. `reason` vaut `control` (commande `pause`) ou `technical`. En pause technique, contient aussi `hostMissing` et `missingPlayers` ; renvoyé à chaque changement de connexion. Pendant une pause, les buzz en attente sont annulés, le joueur qui a la main la garde et le chrono s'arrête.
+- `game-resumed` (S → C) : la partie reprend, automatiquement quand l'écran hôte et les joueurs absents sont revenus, ou sur `resume`.
 - `abort` (C → S, `control`) : annuler la partie.
-- `game-end` (S → C) : fin de partie. Contient `reason` (`ended` ou `aborted`) et `results` : équipes et joueurs sans équipe, triés par score décroissant.
+- `game-end` (S → C) : fin de partie. Contient `reason` (`ended` ou `aborted`) et `results` : équipes et joueurs sans équipe, triés par score décroissant. Suivi d'un `lobby-update` : retour au lobby.
 - `score-adjust` (C → S, `control`) : corriger le score d'un joueur ou d'une équipe. Contient `name` (joueur) ou `team` (équipe) et `delta`.
 - `score-update` (S → C) : nouveau score. Contient `name` (joueur sans équipe) ou `team`, et `score`. Les points d'un joueur en équipe vont à son équipe.
 
@@ -97,13 +96,12 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 ### Partie
 
-- `lobby` : état initial. Les joueurs rejoignent le salon, s'identifient et choisissent une équipe. Le pack et les règles sont configurés.
-- `ready` : tous les joueurs sont prêts. La partie peut démarrer.
+- `lobby` : état initial. Les joueurs rejoignent le salon, s'identifient, choisissent une équipe et se déclarent prêts. Le pack et les règles sont configurés.
+- `ready` : tous les joueurs identifiés et connectés sont prêts (au moins un). Seul état où `start-game` est accepté. Le serveur bascule automatiquement entre `lobby` et `ready`.
 - `in-progress` : la partie est en cours et les manches s'enchaînent.
 - `paused` : pause demandée par le maître du jeu. Personne ne peut buzzer ni répondre.
-- `technical-pause` : pause pour raison technique (aucun écran hôte connecté). Personne ne peut buzzer ni répondre. La déconnexion d'un joueur ne met pas la partie en pause : il se reconnecte avec son jeton.
-- `game-ended` : la partie est terminée. Les résultats sont affichés.
-- `game-aborted` : la partie a été annulée.
+- `technical-pause` : pause automatique quand l'écran hôte ou un joueur identifié perd la connexion. Personne ne peut buzzer ni répondre. Sortie automatique quand tout le monde est revenu, ou manuelle par `control` : `kick` du joueur absent, ou `resume` pour continuer sans lui (impossible sans écran hôte).
+- Fin de partie (`end-game` ou `abort`) : `game-end` publie les résultats, puis la partie revient en `lobby`, tous les joueurs « pas prêts ». Équipes et joueurs sont conservés ; les scores repartent à zéro au prochain `start-game`.
 
 ### Manche (uniquement pendant `in-progress`)
 

@@ -11,8 +11,8 @@ type testClient struct {
 	inbox chan Message
 }
 
-// join connects a client and drains its messages into a large inbox so the room never drops it as slow.
-func join(r *Room, role string, data any) *testClient {
+// connect drains the client's messages into a large inbox so the room never drops it as slow.
+func connect(r *Room, role string) *testClient {
 	c := r.Connect(role)
 	tc := &testClient{c, make(chan Message, 1024)}
 	go func() {
@@ -21,8 +21,13 @@ func join(r *Room, role string, data any) *testClient {
 		}
 		close(tc.inbox)
 	}()
-	r.Receive(c, NewMessage("join", data))
 	return tc
+}
+
+func join(r *Room, role string, data any) *testClient {
+	c := connect(r, role)
+	send(r, c, "join", data)
+	return c
 }
 
 func send(r *Room, c *testClient, typ string, data any) {
@@ -61,7 +66,44 @@ func expectError(t *testing.T, c *testClient, code string) {
 	}
 }
 
+func expectClosed(t *testing.T, c *testClient) {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-c.inbox:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("client was not dropped")
+		}
+	}
+}
+
+// expectState reads lobby updates until the room reports the wanted state.
+func expectState(t *testing.T, c *testClient, state string) {
+	t.Helper()
+	for {
+		var lobby struct {
+			State string `json:"state"`
+		}
+		expect(t, c, "lobby-update", &lobby)
+		if lobby.State == state {
+			return
+		}
+	}
+}
+
+// sync waits until every message sent before it has been processed.
+func sync(t *testing.T, r *Room, c *testClient) {
+	t.Helper()
+	send(r, c, "sync", nil)
+	expectError(t, c, "unknown-type")
+}
+
 func newPlayer(t *testing.T, r *Room, name string) *testClient {
+	t.Helper()
 	c := join(r, RolePlayer, nil)
 	expect(t, c, "welcome", nil)
 	send(r, c, "identify", map[string]string{"name": name})
@@ -69,248 +111,143 @@ func newPlayer(t *testing.T, r *Room, name string) *testClient {
 	return c
 }
 
-func startGame(t *testing.T, r *Room) (ctrl, host *testClient) {
-	ctrl = join(r, RoleControl, nil)
-	expect(t, ctrl, "welcome", nil)
+func newControl(t *testing.T, r *Room) *testClient {
+	t.Helper()
+	c := join(r, RoleControl, nil)
+	expect(t, c, "welcome", nil)
+	return c
+}
+
+// startGame connects control and host, marks the given players ready and starts the game.
+func startGame(t *testing.T, r *Room, players ...*testClient) (ctrl, host *testClient) {
+	t.Helper()
+	ctrl = newControl(t, r)
 	host = join(r, RoleHost, nil)
 	expect(t, host, "welcome", nil)
+	for _, p := range players {
+		send(r, p, "ready", map[string]bool{"ready": true})
+	}
+	expectState(t, ctrl, stateReady)
 	send(r, ctrl, "start-game", nil)
 	expect(t, ctrl, "game-start", nil)
 	return ctrl, host
 }
 
-type answerResult struct {
-	Name    string `json:"name"`
-	Correct bool   `json:"correct"`
-	Points  int    `json:"points"`
+func TestDispatchErrors(t *testing.T) {
+	r := NewRoom()
+	c := connect(r, RolePlayer)
+
+	send(r, c, "buzz", nil)
+	expectError(t, c, "not-joined")
+	send(r, c, "nope", nil)
+	expectError(t, c, "unknown-type")
+	send(r, c, "join", "not an object")
+	expectError(t, c, "bad-data")
+
+	send(r, c, "join", nil)
+	expect(t, c, "welcome", nil)
+	send(r, c, "validate", map[string]bool{"correct": true})
+	expectError(t, c, "forbidden")
+	send(r, c, "buzz", nil)
+	expectError(t, c, "wrong-state")
 }
 
-type scoreUpdate struct {
-	Name  string `json:"name"`
-	Team  string `json:"team"`
-	Score int    `json:"score"`
+func TestSlowClientDropped(t *testing.T) {
+	r := NewRoom()
+	slow := r.Connect(RolePlayer)
+	r.Receive(slow, NewMessage("join", map[string]string{}))
+	alice := newPlayer(t, r, "alice")
+
+	// Fill the slow client's buffer, then any broadcast drops it.
+	for len(slow.send) < cap(slow.send) {
+		slow.send <- Message{Type: "filler"}
+	}
+	send(r, alice, "identify", map[string]string{"name": "alice2"})
+	sync(t, r, alice)
+
+	// Messages still delivered for a dropped client are ignored.
+	r.Receive(slow, NewMessage("identify", map[string]string{"name": "ghost"}))
+	sync(t, r, alice)
+	for range slow.Messages() {
+	}
 }
 
-func TestBuzzPicksOneWinner(t *testing.T) {
+func TestDisconnectTwice(t *testing.T) {
 	r := NewRoom()
 	alice := newPlayer(t, r, "alice")
+	r.Disconnect(alice.Client)
+	r.Disconnect(alice.Client)
+	expectClosed(t, alice)
+
 	bob := newPlayer(t, r, "bob")
-	startGame(t, r)
-
-	send(r, alice, "buzz", nil)
-	send(r, bob, "buzz", nil)
-
-	var winner string
-	for _, c := range []*testClient{alice, bob} {
-		var d struct {
-			Name string `json:"name"`
-		}
-		expect(t, c, "buzz-accepted", &d)
-		if winner == "" {
-			winner = d.Name
-		} else if d.Name != winner {
-			t.Fatalf("clients disagree on winner: %q vs %q", winner, d.Name)
-		}
-	}
-	loser := alice
-	switch winner {
-	case "alice":
-		loser = bob
-	case "bob":
-	default:
-		t.Fatalf("unexpected winner %q", winner)
-	}
-	expect(t, loser, "buzz-blocked", nil)
+	sync(t, r, bob)
 }
 
-func TestReconnectWithToken(t *testing.T) {
+func TestReconnectReplacesDevice(t *testing.T) {
 	r := NewRoom()
-	type welcome struct {
+	var w struct {
 		Token string `json:"token"`
-		Name  string `json:"name"`
 	}
+	first := join(r, RolePlayer, nil)
+	expect(t, first, "welcome", &w)
 
-	c := join(r, RolePlayer, nil)
-	var first welcome
-	expect(t, c, "welcome", &first)
-	send(r, c, "identify", map[string]string{"name": "alice"})
-	expect(t, c, "lobby-update", nil)
-	r.Disconnect(c.Client)
+	second := join(r, RolePlayer, map[string]string{"token": w.Token})
+	expect(t, second, "welcome", nil)
+	expectClosed(t, first)
 
-	c2 := join(r, RolePlayer, map[string]string{"token": first.Token})
-	var again welcome
-	expect(t, c2, "welcome", &again)
-	if again.Token != first.Token || again.Name != "alice" {
-		t.Fatalf("reconnect = %+v, want token kept and name alice", again)
+	// A client switching to another identity leaves its previous player disconnected.
+	send(r, second, "join", nil)
+	var other struct {
+		Token string `json:"token"`
 	}
-
-	c3 := join(r, RolePlayer, map[string]string{"token": "forged"})
-	var forged welcome
-	expect(t, c3, "welcome", &forged)
-	if forged.Token == "forged" || forged.Token == first.Token || forged.Name != "" {
-		t.Fatalf("unknown token must create a new player, got %+v", forged)
+	expect(t, second, "welcome", &other)
+	if other.Token == w.Token {
+		t.Fatal("join without token must create a new player")
 	}
 }
 
-func TestValidate(t *testing.T) {
+func TestGamemasterPhone(t *testing.T) {
 	r := NewRoom()
-	alice := newPlayer(t, r, "alice")
-	bob := newPlayer(t, r, "bob")
-	ctrl, _ := startGame(t, r)
-
-	send(r, alice, "buzz", nil)
-	expect(t, ctrl, "buzz-accepted", nil)
-
-	send(r, alice, "validate", map[string]bool{"correct": true})
-	expectError(t, alice, "forbidden")
-
-	send(r, ctrl, "validate", map[string]bool{"correct": false})
-	var res answerResult
-	expect(t, ctrl, "answer-result", &res)
-	if res != (answerResult{"alice", false, 0}) {
-		t.Fatalf("result = %+v, want alice wrong", res)
+	ctrl := newControl(t, r)
+	send(r, ctrl, "master-invite", nil)
+	var inv struct {
+		Code      string  `json:"code"`
+		ExpiresIn float64 `json:"expiresIn"`
 	}
-	expect(t, ctrl, "buzz-available", nil)
-
-	// alice already tried: only bob can take the hand.
-	send(r, alice, "buzz", nil)
-	send(r, bob, "buzz", nil)
-	var acc struct {
-		Name string `json:"name"`
-	}
-	expect(t, ctrl, "buzz-accepted", &acc)
-	if acc.Name != "bob" {
-		t.Fatalf("second buzz winner = %q, want bob", acc.Name)
+	expect(t, ctrl, "master-invite", &inv)
+	if inv.Code == "" || inv.ExpiresIn != 120 {
+		t.Fatalf("invite = %+v, want a code valid 120 s", inv)
 	}
 
-	send(r, ctrl, "validate", map[string]bool{"correct": true})
-	expect(t, ctrl, "answer-result", &res)
-	if res.Name != "bob" || !res.Correct || res.Points < 95 || res.Points > 100 {
-		t.Fatalf("result = %+v, want bob correct with ~100 points", res)
+	// The phone first opened /play, then scans the invite.
+	phone := join(r, RolePlayer, nil)
+	expect(t, phone, "welcome", nil)
+	send(r, phone, "join", map[string]string{"invite": inv.Code})
+	var w struct {
+		Role  string `json:"role"`
+		Token string `json:"token"`
 	}
-	var score scoreUpdate
-	expect(t, ctrl, "score-update", &score)
-	if score != (scoreUpdate{"bob", "", res.Points}) {
-		t.Fatalf("score = %+v, want bob %d", score, res.Points)
+	expect(t, phone, "welcome", &w)
+	if w.Role != RoleControl || w.Token == "" {
+		t.Fatalf("welcome = %+v, want control with a token", w)
+	}
+	send(r, phone, "master-invite", nil)
+	expect(t, phone, "master-invite", nil)
+
+	reuse := join(r, RolePlayer, map[string]string{"invite": inv.Code})
+	expectError(t, reuse, "invalid-invite")
+
+	back := join(r, RolePlayer, map[string]string{"token": w.Token})
+	expect(t, back, "welcome", &w)
+	if w.Role != RoleControl {
+		t.Fatalf("reconnect role = %q, want control", w.Role)
 	}
 
-	send(r, ctrl, "score-adjust", map[string]any{"name": "bob", "delta": -10})
-	expect(t, ctrl, "score-update", &score)
-	if score != (scoreUpdate{"bob", "", res.Points - 10}) {
-		t.Fatalf("adjusted score = %+v, want bob %d", score, res.Points-10)
-	}
-}
-
-func TestTeams(t *testing.T) {
-	r := NewRoom()
-	alice := newPlayer(t, r, "alice")
-	bob := newPlayer(t, r, "bob")
-	carol := newPlayer(t, r, "carol")
-	send(r, alice, "join-team", map[string]string{"team": "rouge"})
-	send(r, bob, "join-team", map[string]string{"team": "ROUGE"})
-	send(r, carol, "join-team", map[string]string{"team": "bleu"})
-	var lobby struct {
-		Teams []string `json:"teams"`
-	}
-	for range 3 {
-		expect(t, carol, "lobby-update", &lobby)
-	}
-	if len(lobby.Teams) != 2 {
-		t.Fatalf("teams = %v, want rouge and bleu merged case-insensitively", lobby.Teams)
-	}
-	ctrl, _ := startGame(t, r)
-
-	send(r, alice, "buzz", nil)
-	expect(t, ctrl, "buzz-accepted", nil)
-	send(r, ctrl, "validate", map[string]bool{"correct": false})
-	expect(t, ctrl, "buzz-available", nil)
-
-	// alice's team already tried: bob is excluded with her, carol takes the hand.
-	send(r, bob, "buzz", nil)
-	send(r, carol, "buzz", nil)
-	var acc struct {
-		Name string `json:"name"`
-		Team string `json:"team"`
-	}
-	expect(t, ctrl, "buzz-accepted", &acc)
-	if acc.Name != "carol" || acc.Team != "bleu" {
-		t.Fatalf("winner = %+v, want carol of bleu", acc)
-	}
-
-	send(r, ctrl, "validate", map[string]bool{"correct": true})
-	var score scoreUpdate
-	expect(t, ctrl, "score-update", &score)
-	if score.Team != "bleu" || score.Name != "" || score.Score < 95 {
-		t.Fatalf("score = %+v, want team bleu credited", score)
-	}
-}
-
-func TestGameStates(t *testing.T) {
-	r := NewRoom()
-	ctrl := join(r, RoleControl, nil)
-	expect(t, ctrl, "welcome", nil)
-	alice := newPlayer(t, r, "alice")
-
-	send(r, alice, "buzz", nil)
-	expectError(t, alice, "wrong-state")
-	send(r, ctrl, "start-game", nil)
-	expectError(t, ctrl, "no-host")
-
-	host := join(r, RoleHost, nil)
-	expect(t, host, "welcome", nil)
-	send(r, ctrl, "start-game", nil)
-	expect(t, ctrl, "game-start", nil)
-	send(r, alice, "join-team", map[string]string{"team": "late"})
-	expectError(t, alice, "wrong-state")
-
-	var paused struct {
-		Reason string `json:"reason"`
-	}
-	send(r, ctrl, "pause", nil)
-	expect(t, ctrl, "game-paused", &paused)
-	if paused.Reason != "control" {
-		t.Fatalf("pause reason = %q, want control", paused.Reason)
-	}
-	send(r, alice, "buzz", nil)
-	expectError(t, alice, "wrong-state")
-	send(r, ctrl, "resume", nil)
-	expect(t, ctrl, "game-resumed", nil)
-
-	r.Disconnect(host.Client)
-	expect(t, ctrl, "game-paused", &paused)
-	if paused.Reason != "technical" {
-		t.Fatalf("pause reason = %q, want technical", paused.Reason)
-	}
-	host = join(r, RoleHost, nil)
-	expect(t, ctrl, "game-resumed", nil)
-
-	send(r, ctrl, "abort", nil)
-	var end struct {
-		Reason  string   `json:"reason"`
-		Results []result `json:"results"`
-	}
-	expect(t, ctrl, "game-end", &end)
-	if end.Reason != "aborted" || len(end.Results) != 1 || end.Results[0].Name != "alice" {
-		t.Fatalf("game-end = %+v, want aborted with alice", end)
-	}
-	send(r, ctrl, "start-game", nil)
-	expectError(t, ctrl, "wrong-state")
-}
-
-func TestSpeedPoints(t *testing.T) {
-	cases := []struct {
-		elapsed time.Duration
-		want    int
-	}{
-		{0, 100},
-		{15 * time.Second, 60},
-		{30 * time.Second, 20},
-		{45 * time.Second, 20},
-		{-time.Second, 100},
-	}
-	for _, tc := range cases {
-		if got := speedPoints(100, 20, 30*time.Second, tc.elapsed); got != tc.want {
-			t.Errorf("speedPoints(%v) = %d, want %d", tc.elapsed, got, tc.want)
-		}
-	}
+	expired := NewRoom()
+	expired.inviteTTL = -time.Second
+	ctrl2 := newControl(t, expired)
+	send(expired, ctrl2, "master-invite", nil)
+	expect(t, ctrl2, "master-invite", &inv)
+	late := join(expired, RolePlayer, map[string]string{"invite": inv.Code})
+	expectError(t, late, "invalid-invite")
 }

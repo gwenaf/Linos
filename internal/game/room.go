@@ -26,7 +26,9 @@ func NewMessage(typ string, data any) Message {
 }
 
 type Client struct {
-	role   string
+	role string
+	// token is only set for gamemaster phones; players carry theirs in player.token.
+	token  string
 	send   chan Message
 	joined bool
 	closed bool
@@ -61,6 +63,13 @@ type Room struct {
 	teams   []*team
 	state   string
 
+	masters    map[string]bool
+	invites    map[string]time.Time
+	inviteTTL  time.Duration
+	answerTime time.Duration
+	// tolerated players may stay disconnected without pausing the game, until they reconnect.
+	tolerated map[*player]bool
+
 	buzzOpen   bool
 	candidates []*player
 	firstBuzz  time.Time
@@ -78,18 +87,23 @@ type Room struct {
 
 func NewRoom() *Room {
 	r := &Room{
-		events:    make(chan event, 64),
-		clients:   map[*Client]struct{}{},
-		players:   map[string]*player{},
-		state:     stateLobby,
-		attempted: map[any]bool{},
+		events:     make(chan event, 64),
+		clients:    map[*Client]struct{}{},
+		players:    map[string]*player{},
+		state:      stateLobby,
+		masters:    map[string]bool{},
+		invites:    map[string]time.Time{},
+		inviteTTL:  2 * time.Minute,
+		answerTime: 10 * time.Second,
+		tolerated:  map[*player]bool{},
+		attempted:  map[any]bool{},
 	}
 	go r.run()
 	return r
 }
 
 func (r *Room) Connect(role string) *Client {
-	return &Client{role: role, send: make(chan Message, 16)}
+	return &Client{role: role, send: make(chan Message, 64)}
 }
 
 func (r *Room) Receive(c *Client, m Message) {
@@ -112,7 +126,7 @@ func (r *Room) run() {
 				r.closeBuzzWindow()
 			}
 		case evAnswerTimeout:
-			if e.turn == r.turn && r.holder != nil {
+			if e.turn == r.turn {
 				r.resolveAnswer(false)
 			}
 		}
@@ -120,8 +134,8 @@ func (r *Room) run() {
 }
 
 var (
-	running = []string{stateInProgress, statePaused, stateTechnicalPause}
-	open    = append([]string{stateLobby}, running...)
+	lobbyStates   = []string{stateLobby, stateReady}
+	runningStates = []string{stateInProgress, statePaused, stateTechnicalPause}
 )
 
 // commands lists, for each message, the role allowed to send it and the states it is accepted in (nil: any).
@@ -129,21 +143,28 @@ var commands = map[string]struct {
 	role   string
 	states []string
 }{
-	"identify":     {RolePlayer, nil},
-	"join-team":    {RolePlayer, []string{stateLobby}},
-	"buzz":         {RolePlayer, []string{stateInProgress}},
-	"start-game":   {RoleControl, []string{stateLobby}},
-	"pause":        {RoleControl, []string{stateInProgress}},
-	"resume":       {RoleControl, []string{statePaused}},
-	"validate":     {RoleControl, running},
-	"skip":         {RoleControl, []string{stateInProgress}},
-	"score-adjust": {RoleControl, nil},
-	"end-game":     {RoleControl, running},
-	"abort":        {RoleControl, open},
+	"identify":      {RolePlayer, nil},
+	"join-team":     {RolePlayer, lobbyStates},
+	"ready":         {RolePlayer, lobbyStates},
+	"buzz":          {RolePlayer, []string{stateInProgress}},
+	"start-game":    {RoleControl, []string{stateReady}},
+	"pause":         {RoleControl, []string{stateInProgress}},
+	"resume":        {RoleControl, []string{statePaused, stateTechnicalPause}},
+	"validate":      {RoleControl, runningStates},
+	"skip":          {RoleControl, []string{stateInProgress}},
+	"score-adjust":  {RoleControl, nil},
+	"kick":          {RoleControl, nil},
+	"master-invite": {RoleControl, nil},
+	"end-game":      {RoleControl, runningStates},
+	"abort":         {RoleControl, runningStates},
 }
 
 func (r *Room) handle(e event) {
 	c, typ := e.client, e.msg.Type
+	// The transport may still deliver messages read before the room dropped the client.
+	if c.closed {
+		return
+	}
 	if typ == "join" {
 		r.join(c, e.msg)
 		return
@@ -169,12 +190,15 @@ func (r *Room) handle(e event) {
 		r.identify(c, e.msg)
 	case "join-team":
 		r.joinTeam(c, e.msg)
+	case "ready":
+		r.setReady(c, e.msg)
 	case "buzz":
 		r.buzz(c, e.at)
 	case "start-game":
 		r.startGame(c)
 	case "pause":
-		r.pause(statePaused)
+		r.freeze(statePaused)
+		r.broadcast(NewMessage("game-paused", map[string]string{"reason": "control"}))
 	case "resume":
 		r.resume()
 	case "validate":
@@ -184,28 +208,57 @@ func (r *Room) handle(e event) {
 		r.openBuzz()
 	case "score-adjust":
 		r.scoreAdjust(c, e.msg)
+	case "kick":
+		r.kick(c, e.msg)
+	case "master-invite":
+		r.createInvite(c)
 	case "end-game":
-		r.endGame(stateEnded)
+		r.endGame("ended")
 	case "abort":
-		r.endGame(stateAborted)
+		r.endGame("aborted")
 	}
 }
 
 func (r *Room) join(c *Client, m Message) {
-	if c.role == RolePlayer && !r.joinPlayer(c, m) {
+	var d struct {
+		Token  string `json:"token"`
+		Invite string `json:"invite"`
+	}
+	if !r.decode(c, m, &d) {
 		return
+	}
+	if c.role == RolePlayer {
+		switch {
+		case d.Invite != "":
+			expiry, ok := r.invites[d.Invite]
+			delete(r.invites, d.Invite)
+			if !ok || time.Now().After(expiry) {
+				r.sendError(c, "invalid-invite", "invite unknown or expired")
+				return
+			}
+			r.detach(c)
+			c.role, c.token = RoleControl, newToken()
+			r.masters[c.token] = true
+		case r.masters[d.Token]:
+			r.detach(c)
+			c.role, c.token = RoleControl, d.Token
+		default:
+			r.joinPlayer(c, d.Token)
+		}
 	}
 	c.joined = true
 	r.clients[c] = struct{}{}
+
 	welcome := map[string]any{"role": c.role, "state": r.state}
+	if c.token != "" {
+		welcome["token"] = c.token
+	}
 	if c.player != nil {
 		welcome["token"] = c.player.token
 		welcome["name"] = c.player.name
 	}
 	r.send(c, NewMessage("welcome", welcome))
-	if c.role == RoleHost && r.state == stateTechnicalPause {
-		r.resume()
-	}
+	r.connectionsChanged()
 }
 
 func (r *Room) decode(c *Client, m Message, v any) bool {
@@ -248,10 +301,14 @@ func (r *Room) drop(c *Client) {
 	c.closed = true
 	close(c.send)
 	delete(r.clients, c)
+	r.detach(c)
+	r.connectionsChanged()
+}
+
+// detach unlinks a client from its player, leaving the player disconnected unless another device took over.
+func (r *Room) detach(c *Client) {
 	if c.player != nil && c.player.client == c {
 		c.player.client = nil
 	}
-	if c.role == RoleHost && r.state == stateInProgress && !r.hostConnected() {
-		r.pause(stateTechnicalPause)
-	}
+	c.player = nil
 }

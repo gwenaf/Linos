@@ -1,12 +1,13 @@
 package game
 
+import "slices"
+
 const (
 	stateLobby          = "lobby"
+	stateReady          = "ready"
 	stateInProgress     = "in-progress"
 	statePaused         = "paused"
 	stateTechnicalPause = "technical-pause"
-	stateEnded          = "game-ended"
-	stateAborted        = "game-aborted"
 )
 
 func (r *Room) startGame(c *Client) {
@@ -14,32 +15,41 @@ func (r *Room) startGame(c *Client) {
 		r.sendError(c, "no-host", "open the host screen first")
 		return
 	}
+	for _, t := range r.teams {
+		t.score = 0
+	}
+	for _, p := range r.players {
+		p.score = 0
+		if p.client == nil {
+			r.tolerated[p] = true
+		}
+	}
 	r.state = stateInProgress
 	r.resetTrack()
 	r.broadcast(NewMessage("game-start", nil))
 	r.openBuzz()
 }
 
-// pause freezes the game: pending buzzes are discarded, the holder keeps the hand and the clock stops.
-func (r *Room) pause(state string) {
+// freeze leaves in-progress: pending buzzes are discarded, the holder keeps the hand and the clock stops.
+func (r *Room) freeze(state string) {
 	r.state = state
 	r.turn++
 	r.candidates = nil
 	r.stopClock()
-	reason := "control"
-	if state == stateTechnicalPause {
-		reason = "technical"
-	}
-	r.broadcast(NewMessage("game-paused", map[string]string{"reason": reason}))
 }
 
+// resume continues without the players still disconnected; they are tolerated until they reconnect.
 func (r *Room) resume() {
 	if !r.hostConnected() {
-		if r.state != stateTechnicalPause {
-			r.state = stateTechnicalPause
-			r.broadcast(NewMessage("game-paused", map[string]string{"reason": "technical"}))
-		}
+		r.state = stateTechnicalPause
+		_, players := r.missing()
+		r.broadcastTechnicalPause(true, players)
 		return
+	}
+	for _, p := range r.players {
+		if p.client == nil {
+			r.tolerated[p] = true
+		}
 	}
 	r.state = stateInProgress
 	r.startClock()
@@ -53,17 +63,57 @@ func (r *Room) resume() {
 	}
 }
 
-func (r *Room) endGame(state string) {
-	r.state = state
+// connectionsChanged refreshes the lobby, or pauses and resumes a running game as the host or players come and go.
+func (r *Room) connectionsChanged() {
+	switch r.state {
+	case stateLobby, stateReady:
+		r.broadcastLobby()
+	case stateInProgress, stateTechnicalPause:
+		host, players := r.missing()
+		switch {
+		case host || len(players) > 0:
+			if r.state == stateInProgress {
+				r.freeze(stateTechnicalPause)
+			}
+			r.broadcastTechnicalPause(host, players)
+		case r.state == stateTechnicalPause:
+			r.resume()
+		}
+	}
+}
+
+func (r *Room) missing() (host bool, players []string) {
+	players = []string{}
+	for _, p := range r.players {
+		if p.name != "" && p.client == nil && !r.tolerated[p] {
+			players = append(players, p.name)
+		}
+	}
+	slices.Sort(players)
+	return !r.hostConnected(), players
+}
+
+func (r *Room) broadcastTechnicalPause(hostMissing bool, missingPlayers []string) {
+	r.broadcast(NewMessage("game-paused", map[string]any{
+		"reason":         "technical",
+		"hostMissing":    hostMissing,
+		"missingPlayers": missingPlayers,
+	}))
+}
+
+// endGame publishes the results and returns everyone to the lobby, not ready.
+func (r *Room) endGame(reason string) {
+	r.broadcast(NewMessage("game-end", map[string]any{"reason": reason, "results": r.results()}))
+	r.state = stateLobby
 	r.turn++
 	r.holder = nil
 	r.candidates = nil
 	r.buzzOpen = false
-	reason := "ended"
-	if state == stateAborted {
-		reason = "aborted"
+	r.tolerated = map[*player]bool{}
+	for _, p := range r.players {
+		p.ready = false
 	}
-	r.broadcast(NewMessage("game-end", map[string]any{"reason": reason, "results": r.results()}))
+	r.broadcastLobby()
 }
 
 func (r *Room) hostConnected() bool {

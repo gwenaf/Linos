@@ -21,7 +21,7 @@ Un binaire unique lance un serveur local. L'écran hôte et les téléphones son
 **Front — TypeScript**
 
 - Preact (`@preact/signals`), build Vite, compilé puis embarqué dans le binaire
-- Route `/control` (page principale sur le PC hôte : pilotage, réponses, validation, indices), route `/host` (affichage du jeu, ouvert depuis `/control` dans une nouvelle fenêtre) et route `/play` (mobile)
+- Route `/control` (page principale sur le PC hôte : pilotage, réponses, validation, indices), route `/host` (affichage du jeu, ouvert depuis `/control` dans une nouvelle fenêtre) et route `/play` (mobile). Un téléphone peut aussi servir de maître du jeu (invitation par QR code) pour jouer avec un seul écran
 - Lecture via `<audio>` / `<video>` natifs : le navigateur décode, pas Go
 
 **Exécution**
