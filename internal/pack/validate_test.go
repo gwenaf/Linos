@@ -36,6 +36,8 @@ func TestValidationErrors(t *testing.T) {
 		{"answer via", func(m obj) { m["rules"] = obj{"answer": obj{"via": "telepathy"}} }, "rules.answer.via"},
 		{"rebound", func(m obj) { m["rules"] = obj{"answer": obj{"rebound": "some"}} }, "rules.answer.rebound"},
 		{"fuzziness", func(m obj) { m["rules"] = obj{"answer": obj{"fuzziness": 2}} }, "fuzziness must be between 0 and 1"},
+		{"attempts", func(m obj) { m["rules"] = obj{"answer": obj{"attempts": 0}} }, "attempts must be at least 1"},
+		{"lockout", func(m obj) { m["rules"] = obj{"answer": obj{"wrongLockout": -1}} }, "wrongLockout cannot be negative"},
 		{"scoring type", func(m obj) { m["rules"] = obj{"scoring": obj{"type": "lottery"}} }, "rules.scoring.type"},
 		{"scoring bounds", func(m obj) { m["rules"] = obj{"scoring": obj{"max": 10, "min": 20}} }, "rules.scoring.min exceeds max"},
 		{"theme id", func(m obj) { m["themes"] = append(m["themes"].(list), obj{"name": "x"}) }, "themes[1].id is required"},

@@ -63,8 +63,12 @@ func (r *Room) answer(c *Client, m Message, at time.Time) {
 func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) {
 	p := c.player
 	u := unit(p)
-	if !r.mayPlay(u) {
-		r.sendError(c, "not-allowed", "you cannot answer this track now")
+	switch {
+	case !r.mayPlay(u):
+		r.sendError(c, "not-allowed", refusals["not-allowed"])
+		return
+	case r.locked(u):
+		r.sendError(c, "locked", refusals["locked"])
 		return
 	}
 	g := r.unansweredGuess(u, label)
@@ -74,24 +78,39 @@ func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) 
 	}
 	if r.answered[g.Label] == nil {
 		r.answered[g.Label] = map[any]bool{}
+		r.answerTries[g.Label] = map[any]int{}
 	}
-	r.answered[g.Label][u] = true
+	r.answerTries[g.Label][u]++
+	tries := r.answerTries[g.Label][u]
 
 	correct := matches(g, value, r.rules.fuzziness)
 	points := r.pointsFor(u, g, correct, at.Sub(r.trackStart)-r.paused)
-	if correct {
+	final := correct || tries >= r.rules.attempts
+	switch {
+	case correct:
 		r.found[g.Label] = true
+	case !final:
+		r.lock(u)
 	}
+	r.answered[g.Label][u] = final
 	r.pendingPoints = append(r.pendingPoints, scored{p, points})
 	slog.Info("answer submitted", "player", p.name, "guess", g.Label, "value", value, "correct", correct, "points", points)
 
 	result := submission(p, g, value, correct)
 	result["points"] = points
+	result["final"] = final
+	result["remaining"] = 0
+	if !final {
+		result["remaining"] = r.rules.attempts - tries
+	}
 	msg := NewMessage("answer-result", result)
 	for cl := range r.clients {
 		if cl.role == RoleControl || cl.player != nil && unit(cl.player) == u {
 			r.send(cl, msg)
 		}
+	}
+	if !final {
+		return
 	}
 	answered := map[string]any{"name": p.name, "guess": g.Label}
 	if p.team != nil {

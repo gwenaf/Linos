@@ -32,6 +32,11 @@ type rules struct {
 	exclusive    bool
 	othersBonus  int
 	doubleJokers int
+	attempts     int
+	rebound      string // none, others or all
+	reboundBonus int
+	wrongLockout time.Duration
+	pauseOnBuzz  bool
 }
 
 var defaultRules = rules{
@@ -44,6 +49,9 @@ var defaultRules = rules{
 	ranks:       []int{100, 60, 30},
 	max:         100,
 	min:         20,
+	attempts:    1,
+	rebound:     "others",
+	pauseOnBuzz: true,
 }
 
 func (r rules) with(p *pack.Rules) rules {
@@ -65,6 +73,18 @@ func (r rules) with(p *pack.Rules) rules {
 		}
 		if a.Fuzziness != nil {
 			r.fuzziness = *a.Fuzziness
+		}
+		if a.Attempts != nil {
+			r.attempts = *a.Attempts
+		}
+		if a.Rebound != nil {
+			r.rebound = *a.Rebound
+		}
+		if a.WrongLockout != nil {
+			r.wrongLockout = seconds(*a.WrongLockout)
+		}
+		if a.PauseOnBuzz != nil {
+			r.pauseOnBuzz = *a.PauseOnBuzz
 		}
 	}
 	if o := p.Owner; o != nil {
@@ -102,6 +122,9 @@ func (r rules) withScoring(s *pack.Scoring) rules {
 	}
 	if len(s.Ranks) > 0 {
 		r.ranks = s.Ranks
+	}
+	if s.ReboundBonus != nil {
+		r.reboundBonus = *s.ReboundBonus
 	}
 	return r
 }
@@ -206,8 +229,9 @@ func (r *Room) startTrack() {
 	r.found = map[string]bool{}
 	r.answered = map[string]map[any]bool{}
 	r.correctCount = map[string]int{}
+	r.answerTries = map[string]map[any]int{}
 	r.pendingPoints = nil
-	r.attempted = map[any]bool{}
+	r.newGuessCycle()
 	r.paused, r.clockStops = 0, 0
 	r.headStartOver = r.owner == nil || r.rules.headStart == 0
 	r.sendTrackStart()
@@ -234,13 +258,16 @@ func (r *Room) trackPayload(role string) map[string]any {
 		guesses[i] = publicGuess{g.Label, g.Type, g.Choices, g.ChoicesAt}
 	}
 	public := map[string]any{
-		"index":    r.current,
-		"total":    len(r.playlist),
-		"round":    it.round,
-		"duration": it.rules.duration.Seconds(),
-		"guesses":  guesses,
-		"mode":     it.rules.mode,
-		"via":      it.rules.via,
+		"index":       r.current,
+		"total":       len(r.playlist),
+		"round":       it.round,
+		"duration":    it.rules.duration.Seconds(),
+		"guesses":     guesses,
+		"mode":        it.rules.mode,
+		"via":         it.rules.via,
+		"attempts":    it.rules.attempts,
+		"rebound":     it.rules.rebound,
+		"pauseOnBuzz": it.rules.pauseOnBuzz,
 	}
 	if r.owner != nil {
 		public["owner"] = unitPayload(r.owner)

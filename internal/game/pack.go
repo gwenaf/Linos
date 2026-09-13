@@ -48,7 +48,7 @@ func (r *Room) listPacks(c *Client) {
 		p, err := pack.Open(filepath.Join(r.packsDir, e.Name()))
 		if err == nil {
 			it.Title = p.Manifest.Title
-			err = unsupported(&p.Manifest)
+			err = checkControl(&p.Manifest, cmp.Or(p.Manifest.Game.Control.Default, "master"))
 			p.Close()
 		}
 		if err != nil {
@@ -77,7 +77,7 @@ func (r *Room) configure(c *Client, m Message) {
 		if control == "" {
 			control = cmp.Or(p.Manifest.Game.Control.Default, "master")
 		}
-		if err = errors.Join(unsupported(&p.Manifest), checkControl(&p.Manifest, control)); err != nil {
+		if err = checkControl(&p.Manifest, control); err != nil {
 			p.Close()
 		}
 	}
@@ -113,52 +113,6 @@ func (r *Room) configuredPayload() map[string]any {
 		"author":  lp.pack.Manifest.Author,
 		"rounds":  rounds,
 		"tracks":  len(lp.pack.Manifest.Tracks),
-	}
-}
-
-// unsupported lists the manifest features this build does not play yet, so a pack is refused rather than misplayed.
-func unsupported(m *pack.Manifest) error {
-	var errs []error
-	fail := func(format string, args ...any) {
-		errs = append(errs, fmt.Errorf(format+": not supported yet", args...))
-	}
-
-	checkRules("rules", m.Rules, fail)
-	for i, rd := range m.Rounds {
-		checkRules(fmt.Sprintf("rounds[%d].rules", i), rd.Rules, fail)
-	}
-	for i, t := range m.Tracks {
-		for j, g := range t.Guesses {
-			checkScoring(fmt.Sprintf("tracks[%d].guesses[%d].scoring", i, j), g.Scoring, fail)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-func checkRules(at string, r *pack.Rules, fail func(string, ...any)) {
-	if r == nil {
-		return
-	}
-	if a := r.Answer; a != nil {
-		if a.Attempts != nil && *a.Attempts != 1 {
-			fail("%s.answer.attempts %d", at, *a.Attempts)
-		}
-		if a.Rebound != nil && *a.Rebound != "others" {
-			fail("%s.answer.rebound %q", at, *a.Rebound)
-		}
-		if a.PauseOnBuzz != nil && !*a.PauseOnBuzz {
-			fail("%s.answer.pauseOnBuzz false", at)
-		}
-	}
-	checkScoring(at+".scoring", r.Scoring, fail)
-}
-
-func checkScoring(at string, s *pack.Scoring, fail func(string, ...any)) {
-	if s == nil {
-		return
-	}
-	if s.ReboundBonus != nil && *s.ReboundBonus != 0 {
-		fail("%s.reboundBonus", at)
 	}
 }
 

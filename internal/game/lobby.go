@@ -151,7 +151,7 @@ func (r *Room) kick(c *Client, m Message) {
 	if r.holder == p {
 		r.holder = nil
 		r.turn++
-		r.startClock()
+		r.releaseHolderClock()
 		r.openBuzz()
 	}
 	r.unitsChanged(u)

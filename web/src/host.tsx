@@ -36,7 +36,9 @@ fetch('/api/join')
 let clockBase = 0
 let clockSince: number | null = null
 const clockNow = () => clockBase + (clockSince === null ? 0 : (performance.now() - clockSince) / 1000)
-const clockRunning = computed(() => live.value && !paused.value && !holder.value && !ended.value)
+// With pauseOnBuzz off, the track keeps playing while a player answers.
+const holderStops = () => !!holder.value && track.value?.pauseOnBuzz !== false
+const clockRunning = computed(() => live.value && !paused.value && !holderStops() && !ended.value)
 effect(() => {
   if (clockRunning.value && clockSince === null) clockSince = performance.now()
   if (!clockRunning.value && clockSince !== null) {
@@ -241,7 +243,7 @@ function TrackView() {
       effect(() => {
         const v = video.current
         if (!v) return
-        if (paused.value || holder.value) v.pause()
+        if (paused.value || holderStops()) v.pause()
         else v.play().catch(() => {})
       }),
     [t.index],

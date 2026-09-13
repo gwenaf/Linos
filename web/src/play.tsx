@@ -130,8 +130,15 @@ conn.on('buzz-accepted', (d) => {
 conn.on('answer-result', (d) => {
   holder.value = null
   const simultaneous = track.value?.mode === 'simultaneous'
-  if (d.correct || simultaneous) done.value = [...done.value, d.guess]
-  if (d.name === me.value) feedback.value = d.correct ? `Bravo ! +${d.points}` : 'Raté…'
+  if (d.correct || (simultaneous && d.final)) done.value = [...done.value, d.guess]
+  if (d.name !== me.value) return
+  if (d.correct) feedback.value = `Bravo ! +${d.points}`
+  else feedback.value = d.remaining > 0 ? `Raté… encore ${d.remaining} essai(s)` : 'Raté…'
+})
+conn.on('lockout', (d) => {
+  if (unitName(d) !== myUnit()) return
+  canBuzz.value = false
+  feedback.value = `Bloqué ${d.duration} s après cette erreur`
 })
 conn.on('track-end', (d) => {
   ended.value = d

@@ -106,6 +106,10 @@ conn.on('wagered', (d) => {
 })
 conn.on('joker-used', (d) => logEvent(`${unitName(d)} joue son joker double`))
 conn.on('head-start-over', () => logEvent("Fin de l'avance du propriétaire du thème"))
+conn.on('lockout', (d) => logEvent(`${unitName(d)} bloqué ${d.duration} s`))
+conn.on('track-end', (d) => {
+  if (d.reason === 'missed') logEvent('Mauvaise réponse sans rebond : piste terminée')
+})
 conn.on('round-end', (d) => logEvent(`Fin de la manche ${d.name}`))
 conn.on('eliminated', (d) => {
   eliminated.value = [...eliminated.value, ...d.units.map(unitName)]

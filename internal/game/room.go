@@ -50,6 +50,7 @@ const (
 	evAnswerTimeout
 	evTrackTimer
 	evHeadStart
+	evLockout
 )
 
 type event struct {
@@ -58,6 +59,7 @@ type event struct {
 	msg    Message
 	at     time.Time
 	turn   int
+	unit   any // team or player a lockout timer is for
 }
 
 // Room state is only touched by the run goroutine; everything else goes through events.
@@ -110,7 +112,13 @@ type Room struct {
 	candidates []*player
 	firstBuzz  time.Time
 	holder     *player
-	attempted  map[any]bool
+	// Attempts in buzz mode, per guess: tries per unit, the unit barred by rebound "others",
+	// lockouts (in track time played) and wrong answers so far (rebound bonus).
+	tries          map[any]int
+	reboundBlocked any
+	lockedUntil    map[any]time.Duration
+	wrongs         int
+	answerTries    map[string]map[any]int
 
 	trackStart    time.Time
 	paused        time.Duration
@@ -131,7 +139,6 @@ func NewRoom(packsDir string) *Room {
 		invites:   map[string]time.Time{},
 		inviteTTL: 2 * time.Minute,
 		tolerated: map[*player]bool{},
-		attempted: map[any]bool{},
 		packsDir:  packsDir,
 	}
 	go r.run()
@@ -170,6 +177,8 @@ func (r *Room) run() {
 			r.trackTimer(e.turn)
 		case evHeadStart:
 			r.headStartTimer(e.turn)
+		case evLockout:
+			r.lockoutTimer(e.turn, e.unit)
 		}
 	}
 }

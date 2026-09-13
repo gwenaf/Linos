@@ -279,6 +279,9 @@ func (r *Room) pointsFor(u any, g *pack.Guess, correct bool, elapsed time.Durati
 	if correct && r.owner != nil && u != r.owner {
 		points += r.rules.othersBonus
 	}
+	if correct && r.wrongs > 0 {
+		points += gr.reboundBonus
+	}
 	if points > 0 && r.doubled[u] {
 		points *= 2
 	}

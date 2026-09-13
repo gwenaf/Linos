@@ -69,7 +69,8 @@ Exemples :
 - Avant chaque piste, le serveur enchaîne : choix du thème (manches `theme-pick`, pistes tirées au moment du choix), puis mises (barème `wager`), puis la piste. `skip` abandonne ces étapes.
 - Un seul calcul de points pour le buzz et les réponses simultanées : barème (rapidité, fixe, rang, mise), bonus `othersBonus` pour une autre équipe que le propriétaire du thème, puis joker double sur les points positifs.
 - Fin de manche : `round-end`, puis éliminations (`eliminate`). Fin de partie : pistes épuisées (avec mort subite éventuelle), score cible atteint à la fin d'une piste, ou dernière équipe restante.
-- Fonctions du manifest pas encore jouées (pack refusé au `configure` avec la liste) : plusieurs essais par piste, rebond autre que `others`, `pauseOnBuzz` à faux, bonus de rebond. `wrongLockout` est ignoré tant qu'un seul essai est permis. Le manifest d'exemple est jouable (vérifié par un test).
+- Toutes les règles du manifest sont jouées ; seules les combinaisons impossibles sont refusées au `configure` (voir `PROTOCOL.md`). Le manifest d'exemple est jouable (vérifié par un test).
+- Essais en mode buzz, par élément à deviner : `attempts` par équipe, `rebound` (`none` termine la piste, `others` donne la priorité aux autres, `all` laisse tout le monde rebuzzer), `wrongLockout` (blocage en temps de piste joué), `reboundBonus` pour une bonne réponse après une erreur. Tout est remis à zéro quand un élément est trouvé. En réponses simultanées, `attempts` et `wrongLockout` s'appliquent par équipe et par élément.
 
 ### Builder (projet séparé)
 

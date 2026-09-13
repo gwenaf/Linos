@@ -155,6 +155,12 @@ func (v *validator) rules(at string, r *Rules) {
 		if a.Fuzziness != nil && (*a.Fuzziness < 0 || *a.Fuzziness > 1) {
 			v.fail("%s.answer.fuzziness must be between 0 and 1", at)
 		}
+		if a.Attempts != nil && *a.Attempts < 1 {
+			v.fail("%s.answer.attempts must be at least 1", at)
+		}
+		if a.WrongLockout != nil && *a.WrongLockout < 0 {
+			v.fail("%s.answer.wrongLockout cannot be negative", at)
+		}
 	}
 	v.scoring(at+".scoring", r.Scoring)
 }

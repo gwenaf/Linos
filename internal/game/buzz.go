@@ -22,11 +22,11 @@ func (r *Room) buzz(c *Client, at time.Time) {
 		return
 	}
 	u := unit(p)
-	if !r.mayPlay(u) {
-		r.sendError(c, "not-allowed", "you cannot answer this track now")
+	if refusal := r.buzzRefusal(u); refusal != "" {
+		r.sendError(c, refusal, refusals[refusal])
 		return
 	}
-	if !r.buzzOpen || r.attempted[u] || slices.ContainsFunc(r.candidates, func(q *player) bool { return unit(q) == u }) {
+	if !r.buzzOpen || slices.ContainsFunc(r.candidates, func(q *player) bool { return unit(q) == u }) {
 		return
 	}
 	if len(r.candidates) == 0 {
@@ -50,11 +50,18 @@ func (r *Room) closeBuzzWindow() {
 	r.buzzOpen = false
 	r.holder = winner
 	r.holderAnswered = false
-	r.attempted[unit(winner)] = true
+	wu := unit(winner)
+	r.tries[wu]++
+	if r.reboundBlocked != wu {
+		// Another team took the hand: the team that failed before may buzz again.
+		r.reboundBlocked = nil
+	}
 	r.turn++
 	// Candidates tied inside the window share the first buzz time; the clock stops while the holder answers.
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
-	r.stopClock()
+	if r.rules.pauseOnBuzz {
+		r.stopClock()
+	}
 
 	r.broadcast(NewMessage("buzz-accepted", r.holderPayload()))
 	blocked := NewMessage("buzz-blocked", nil)
@@ -112,11 +119,12 @@ func (r *Room) pendingGuess(label string) *pack.Guess {
 
 func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
 	p := r.holder
+	u := unit(p)
 	r.holder = nil
 	r.turn++
-	r.startClock()
+	r.releaseHolderClock()
 
-	points := r.pointsFor(unit(p), g, correct, r.holderElapsed)
+	points := r.pointsFor(u, g, correct, r.holderElapsed)
 	label := ""
 	if correct {
 		label = g.Label
@@ -129,14 +137,106 @@ func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
 	}
 
 	switch {
-	case !correct:
-		r.openBuzz()
-	case len(r.found) == len(r.track().Guesses):
+	case correct && len(r.found) == len(r.track().Guesses):
 		r.endTrack("found")
-	default:
+	case correct:
 		// A new guess is up for grabs: everyone may buzz again.
-		r.attempted = map[any]bool{}
+		r.newGuessCycle()
 		r.openBuzz()
+	default:
+		r.wrongs++
+		r.lock(u)
+		switch r.rules.rebound {
+		case "none":
+			r.endTrack("missed")
+			return
+		case "others":
+			r.reboundBlocked = u
+		}
+		r.openBuzz()
+	}
+}
+
+var refusals = map[string]string{
+	"not-allowed":     "you cannot answer this track now",
+	"no-attempt-left": "no attempt left on this guess",
+	"rebound":         "another team gets the hand after your mistake",
+	"locked":          "wait for your lockout to end",
+}
+
+// buzzRefusal gives the reason unit u may not buzz now, or "" when it may.
+func (r *Room) buzzRefusal(u any) string {
+	switch {
+	case !r.mayPlay(u):
+		return "not-allowed"
+	case r.tries[u] >= r.rules.attempts:
+		return "no-attempt-left"
+	case u == r.reboundBlocked:
+		return "rebound"
+	case r.locked(u):
+		return "locked"
+	}
+	return ""
+}
+
+// newGuessCycle clears attempts, rebound and lockouts when a guess opens.
+func (r *Room) newGuessCycle() {
+	r.tries = map[any]int{}
+	r.reboundBlocked = nil
+	r.lockedUntil = map[any]time.Duration{}
+	r.wrongs = 0
+}
+
+// releaseHolderClock restarts the clock stopped by a buzz, when the rules stop it.
+func (r *Room) releaseHolderClock() {
+	if r.rules.pauseOnBuzz {
+		r.startClock()
+	}
+}
+
+func (r *Room) locked(u any) bool {
+	until, ok := r.lockedUntil[u]
+	return ok && r.elapsed() < until
+}
+
+// lock keeps unit u from answering for the wrong-answer lockout, counted in track time played.
+func (r *Room) lock(u any) {
+	if r.rules.wrongLockout <= 0 {
+		return
+	}
+	r.lockedUntil[u] = r.elapsed() + r.rules.wrongLockout
+	l := unitPayload(u)
+	l["duration"] = r.rules.wrongLockout.Seconds()
+	r.broadcast(NewMessage("lockout", l))
+	r.armLockout(u)
+}
+
+func (r *Room) armLockout(u any) {
+	seq := r.trackSeq
+	time.AfterFunc(r.lockedUntil[u]-r.elapsed(), func() { r.events <- event{kind: evLockout, turn: seq, unit: u} })
+}
+
+// lockoutTimer lifts a lockout once played, and tells the unit it may buzz again.
+func (r *Room) lockoutTimer(seq int, u any) {
+	until, ok := r.lockedUntil[u]
+	if seq != r.trackSeq || !ok || r.trackState != trackLive || r.clockStops > 0 {
+		return
+	}
+	if r.elapsed() < until {
+		r.armLockout(u)
+		return
+	}
+	delete(r.lockedUntil, u)
+	if r.buzzOpen && r.state == stateInProgress && r.buzzRefusal(u) == "" {
+		r.sendToUnit(u, NewMessage("buzz-available", nil))
+	}
+}
+
+func (r *Room) sendToUnit(u any, m Message) {
+	for c := range r.clients {
+		if c.player != nil && unit(c.player) == u {
+			r.send(c, m)
+		}
 	}
 }
 
@@ -148,7 +248,7 @@ func (r *Room) openBuzz() {
 	}
 	available := NewMessage("buzz-available", nil)
 	for c := range r.clients {
-		if c.player == nil || !r.attempted[unit(c.player)] && r.mayPlay(unit(c.player)) {
+		if c.player == nil || r.buzzRefusal(unit(c.player)) == "" {
 			r.send(c, available)
 		}
 	}
@@ -170,6 +270,9 @@ func (r *Room) startClock() {
 			r.armTrackTimer()
 			if !r.headStartOver {
 				r.armHeadStart()
+			}
+			for u := range r.lockedUntil {
+				r.armLockout(u)
 			}
 		}
 	}

@@ -63,7 +63,7 @@ func (r *Room) snapshot(c *Client) map[string]any {
 	}
 	if p := c.player; p != nil {
 		u := unit(p)
-		s["canBuzz"] = r.state == stateInProgress && r.buzzOpen && p.name != "" && !r.attempted[u] && r.mayPlay(u)
+		s["canBuzz"] = r.state == stateInProgress && r.buzzOpen && p.name != "" && r.buzzRefusal(u) == ""
 		answered := []string{}
 		for _, g := range r.track().Guesses {
 			if r.answered[g.Label][u] {
