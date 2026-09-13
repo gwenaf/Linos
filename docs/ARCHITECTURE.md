@@ -53,13 +53,15 @@ Exemples :
   cover.jpg       facultatif, déclaré dans le manifest (champ "cover")
   ```
 
-- Lecture d'un média : `archive/zip` (`DataOffset`) + `io.SectionReader`, servi par `http.ServeContent` (requêtes Range). Un média compressé par erreur est extrait une fois dans un cache local.
+- Lecture d'un média : `archive/zip` (`DataOffset`) + `io.SectionReader`, servi par `http.ServeContent` (requêtes Range). Un média compressé dans l'archive est refusé au chargement (le builder écrit en `Store`) : pas de cache d'extraction.
 - Validation au chargement :
   - chemins de médias relatifs uniquement, `..` et chemins absolus refusés (protection zip slip) ;
   - chaque `id` de piste ou de thème référencé existe, chaque fichier média est présent ;
   - manifest décodé dans des structures Go qui refusent les champs inconnus ;
-  - `version` plus récente que celle supportée : pack refusé avec un message explicite.
-- Intégrité : CRC32 intégré au ZIP. Pas de signature de pack.
+  - `version` plus récente que celle supportée : pack refusé avec un message explicite ;
+  - valeurs énumérées (modes, types, sélections) et bornes (`min` ≤ `max`, `fuzziness` entre 0 et 1) contrôlées ;
+  - toutes les erreurs sont renvoyées en une fois, préfixées par leur chemin (`tracks[2].guesses[0].answer`).
+- Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
 - Import de mp3 par glisser-déposer : manifest généré en mémoire, aucun fichier créé.
 
 ### Builder (projet séparé)
