@@ -33,10 +33,8 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `state` (S → C) : état complet de la partie. Envoyé après une reconnexion ou sur demande.
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
-- `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe.
-- `assign-team` (S → C) : un joueur est assigné à une équipe. Contient le nom de l'équipe et le pseudonyme du joueur.
-- `list-teams` (S → C) : liste des équipes du salon.
-- `lobby-update` (S → C) : joueurs, équipes et statut prêt/pas prêt.
+- `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe ; l'équipe est créée si elle n'existe pas (8 au maximum, noms comparés sans tenir compte de la casse). Un nom vide quitte l'équipe. Une équipe vide et sans points est supprimée.
+- `lobby-update` (S → C) : `players` (pseudonyme et équipe de chacun) et `teams` (noms des équipes). Statut prêt/pas prêt à venir.
 - `configure` (C → S, `control`) : choisir le pack, la validation (`master` : par la page `control`, ou `auto`) et les règles modifiées pour cette partie.
 - `kick` (C → S, `control`) : demander l'expulsion d'un joueur.
 - `kicked` (S → C) : un joueur a été expulsé.
@@ -55,8 +53,8 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `game-paused` / `game-resumed` (S → C) : la partie est en pause ou reprend. Le motif est `control` ou `technical`, par exemple quand l'écran hôte est déconnecté.
 - `abort` (C → S, `control`) : annuler la partie.
 - `game-end` (S → C) : fin de partie. Contient les résultats, et le motif s'il s'agit d'une annulation.
-- `score-adjust` (C → S, `control`) : corriger le score d'un joueur ou d'une équipe. Contient la cible et le delta de points.
-- `score-update` (S → C) : nouveau score d'un joueur ou d'une équipe.
+- `score-adjust` (C → S, `control`) : corriger le score d'un joueur ou d'une équipe. Contient `name` (joueur) ou `team` (équipe) et `delta`.
+- `score-update` (S → C) : nouveau score. Contient `name` (joueur sans équipe) ou `team`, et `score`. Les points d'un joueur en équipe vont à son équipe.
 
 ### Manche
 
@@ -84,7 +82,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `choices` (S → C) : réponses proposées pour un élément de type `choice`.
 - `buzz-available` (S → C) : le buzz est ouvert pour le destinataire, par exemple à la fin de l'avance du propriétaire ou après un blocage.
 - `buzz` (C → S) : le joueur buzze. Aucune donnée : le serveur identifie le joueur via sa session.
-- `buzz-accepted` (S → C) : un joueur a la main. Contient le pseudonyme et le temps imparti pour répondre. Si `pauseOnBuzz` est actif, le média et le chrono sont mis en pause.
+- `buzz-accepted` (S → C) : un joueur a la main. Contient le pseudonyme, son équipe éventuelle et le temps imparti pour répondre. Si `pauseOnBuzz` est actif, le média et le chrono sont mis en pause.
 - `buzz-blocked` (S → C) : le buzz est fermé pour le destinataire.
 - `answer` (C → S) : réponse à un élément. Contient le libellé de l'élément et la valeur. Le serveur identifie le joueur via sa session.
 - `answer-submitted` (S → C, `control`) : réponse reçue d'un joueur. Contient le pseudonyme, l'élément, la valeur et, en validation `auto`, le verdict calculé.

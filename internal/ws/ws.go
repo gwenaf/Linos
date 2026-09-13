@@ -21,6 +21,7 @@ const (
 	buzzWindow = 30 * time.Millisecond
 	answerTime = 10 * time.Second
 	maxNameLen = 32
+	maxTeams   = 8
 )
 
 // Manifest defaults until pack rules are loaded.
@@ -41,6 +42,7 @@ var requiredRole = map[string]string{
 	"buzz":         rolePlayer,
 	"validate":     roleControl,
 	"skip":         roleControl,
+	"join-team":    rolePlayer,
 	"score-adjust": roleControl,
 }
 
@@ -69,7 +71,21 @@ type player struct {
 	token string
 	name  string
 	score int
+	team  *team
 	conn  *conn
+}
+
+type team struct {
+	name  string
+	score int
+}
+
+// unit is who buzzes, gets excluded and scores: the team when the player has one, else the player.
+func unit(p *player) any {
+	if p.team != nil {
+		return p.team
+	}
+	return p
 }
 
 type eventKind int
@@ -94,12 +110,13 @@ type Room struct {
 	events  chan event
 	conns   map[*conn]struct{}
 	players map[string]*player
+	teams   []*team
 
 	buzzOpen   bool
 	candidates []*player
 	firstBuzz  time.Time
 	holder     *player
-	attempted  map[*player]bool
+	attempted  map[any]bool
 
 	trackStart    time.Time
 	paused        time.Duration
@@ -115,7 +132,7 @@ func NewRoom() *Room {
 		conns:      map[*conn]struct{}{},
 		players:    map[string]*player{},
 		buzzOpen:   true,
-		attempted:  map[*player]bool{},
+		attempted:  map[any]bool{},
 		trackStart: time.Now(),
 	}
 	go r.run()
@@ -230,9 +247,8 @@ func (r *Room) handleMessage(e event) {
 		if !r.decode(c, e.msg, &d) {
 			return
 		}
-		name := strings.TrimSpace(d.Name)
-		if name == "" || utf8.RuneCountInString(name) > maxNameLen {
-			r.sendError(c, "invalid-name", "name must be 1 to 32 characters")
+		name, ok := r.validName(c, d.Name)
+		if !ok {
 			return
 		}
 		for _, p := range r.players {
@@ -250,7 +266,8 @@ func (r *Room) handleMessage(e event) {
 			r.sendError(c, "not-identified", "identify first")
 			return
 		}
-		if !r.buzzOpen || r.attempted[p] || slices.Contains(r.candidates, p) {
+		u := unit(p)
+		if !r.buzzOpen || r.attempted[u] || slices.ContainsFunc(r.candidates, func(q *player) bool { return unit(q) == u }) {
 			return
 		}
 		if len(r.candidates) == 0 {
@@ -283,18 +300,58 @@ func (r *Room) handleMessage(e event) {
 	case "skip":
 		r.holder = nil
 		r.candidates = nil
-		r.attempted = map[*player]bool{}
+		r.attempted = map[any]bool{}
 		r.turn++
 		r.trackStart = time.Now()
 		r.paused = 0
 		r.openBuzz()
 
+	case "join-team":
+		var d struct {
+			Team string `json:"team"`
+		}
+		if !r.decode(c, e.msg, &d) {
+			return
+		}
+		var t *team
+		if strings.TrimSpace(d.Team) != "" {
+			name, ok := r.validName(c, d.Team)
+			if !ok {
+				return
+			}
+			if t = r.teamByName(name); t == nil {
+				if len(r.teams) >= maxTeams {
+					r.sendError(c, "too-many-teams", "team limit reached")
+					return
+				}
+				t = &team{name: name}
+				r.teams = append(r.teams, t)
+			}
+		}
+		old := c.player.team
+		c.player.team = t
+		if old != nil && old != t && old.score == 0 && !r.hasMembers(old) {
+			r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == old })
+		}
+		r.broadcastLobby()
+
 	case "score-adjust":
 		var d struct {
 			Name  string `json:"name"`
+			Team  string `json:"team"`
 			Delta int    `json:"delta"`
 		}
 		if !r.decode(c, e.msg, &d) {
+			return
+		}
+		if d.Team != "" {
+			t := r.teamByName(d.Team)
+			if t == nil {
+				r.sendError(c, "unknown-team", "no team named "+d.Team)
+				return
+			}
+			t.score += d.Delta
+			r.broadcastTeamScore(t)
 			return
 		}
 		p := r.playerByName(d.Name)
@@ -302,8 +359,7 @@ func (r *Room) handleMessage(e event) {
 			r.sendError(c, "unknown-player", "no player named "+d.Name)
 			return
 		}
-		p.score += d.Delta
-		r.broadcastScore(p)
+		r.addPoints(p, d.Delta)
 
 	default:
 		r.sendError(c, "unknown-type", "unknown message type")
@@ -341,16 +397,17 @@ func (r *Room) closeBuzzWindow() {
 	r.candidates = nil
 	r.buzzOpen = false
 	r.holder = winner
-	r.attempted[winner] = true
+	r.attempted[unit(winner)] = true
 	r.turn++
 	// Candidates tied inside the window share the first buzz time; the clock pauses while the holder answers.
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
 	r.pausedAt = time.Now()
 
-	r.broadcast(newMessage("buzz-accepted", map[string]any{
-		"name":       winner.name,
-		"answerTime": answerTime.Seconds(),
-	}))
+	accepted := map[string]any{"name": winner.name, "answerTime": answerTime.Seconds()}
+	if winner.team != nil {
+		accepted["team"] = winner.team.name
+	}
+	r.broadcast(newMessage("buzz-accepted", accepted))
 	blocked := newMessage("buzz-blocked", nil)
 	for _, p := range r.players {
 		if p != winner {
@@ -371,10 +428,9 @@ func (r *Room) resolveAnswer(correct bool) {
 	if correct {
 		points = speedPoints(scoring.max, scoring.min, scoring.duration, r.holderElapsed)
 	}
-	p.score += points
 	r.broadcast(newMessage("answer-result", map[string]any{"name": p.name, "correct": correct, "points": points}))
 	if points != 0 {
-		r.broadcastScore(p)
+		r.addPoints(p, points)
 	}
 	if !correct {
 		r.openBuzz()
@@ -387,8 +443,45 @@ func speedPoints(hi, lo int, duration, elapsed time.Duration) int {
 	return hi - int(math.Round(float64(hi-lo)*f))
 }
 
-func (r *Room) broadcastScore(p *player) {
+func (r *Room) addPoints(p *player, points int) {
+	if p.team != nil {
+		p.team.score += points
+		r.broadcastTeamScore(p.team)
+		return
+	}
+	p.score += points
 	r.broadcast(newMessage("score-update", map[string]any{"name": p.name, "score": p.score}))
+}
+
+func (r *Room) broadcastTeamScore(t *team) {
+	r.broadcast(newMessage("score-update", map[string]any{"team": t.name, "score": t.score}))
+}
+
+func (r *Room) validName(c *conn, raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if name == "" || utf8.RuneCountInString(name) > maxNameLen {
+		r.sendError(c, "invalid-name", "name must be 1 to 32 characters")
+		return "", false
+	}
+	return name, true
+}
+
+func (r *Room) teamByName(name string) *team {
+	for _, t := range r.teams {
+		if strings.EqualFold(t.name, name) {
+			return t
+		}
+	}
+	return nil
+}
+
+func (r *Room) hasMembers(t *team) bool {
+	for _, p := range r.players {
+		if p.team == t {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Room) playerByName(name string) *player {
@@ -404,21 +497,34 @@ func (r *Room) openBuzz() {
 	r.buzzOpen = true
 	available := newMessage("buzz-available", nil)
 	for c := range r.conns {
-		if c.player == nil || !r.attempted[c.player] {
+		if c.player == nil || !r.attempted[unit(c.player)] {
 			r.send(c, available)
 		}
 	}
 }
 
 func (r *Room) broadcastLobby() {
-	names := []string{}
-	for _, p := range r.players {
-		if p.name != "" {
-			names = append(names, p.name)
-		}
+	type entry struct {
+		Name string `json:"name"`
+		Team string `json:"team,omitempty"`
 	}
-	slices.Sort(names)
-	r.broadcast(newMessage("lobby-update", map[string][]string{"players": names}))
+	players := []entry{}
+	for _, p := range r.players {
+		if p.name == "" {
+			continue
+		}
+		e := entry{Name: p.name}
+		if p.team != nil {
+			e.Team = p.team.name
+		}
+		players = append(players, e)
+	}
+	slices.SortFunc(players, func(a, b entry) int { return strings.Compare(a.Name, b.Name) })
+	teams := []string{}
+	for _, t := range r.teams {
+		teams = append(teams, t.name)
+	}
+	r.broadcast(newMessage("lobby-update", map[string]any{"players": players, "teams": teams}))
 }
 
 func (r *Room) decode(c *conn, m Message, v any) bool {

@@ -139,6 +139,71 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestTeams(t *testing.T) {
+	url, ctx := setup(t)
+
+	ctrl := dial(t, ctx, url+"?role=control")
+	write(t, ctx, ctrl, "join", nil)
+	readUntil(t, ctx, ctrl, "welcome", nil)
+	alice := joinPlayer(t, ctx, url, "alice")
+	bob := joinPlayer(t, ctx, url, "bob")
+	carol := joinPlayer(t, ctx, url, "carol")
+
+	for c, team := range map[*websocket.Conn]string{alice: "rouge", bob: "ROUGE", carol: "bleu"} {
+		write(t, ctx, c, "join-team", map[string]string{"team": team})
+	}
+	// Wait until the server has applied every join-team, whatever the connection order.
+	for {
+		var lobby struct {
+			Players []struct {
+				Team string `json:"team"`
+			} `json:"players"`
+			Teams []string `json:"teams"`
+		}
+		readUntil(t, ctx, ctrl, "lobby-update", &lobby)
+		assigned := 0
+		for _, p := range lobby.Players {
+			if p.Team != "" {
+				assigned++
+			}
+		}
+		if assigned == 3 {
+			if len(lobby.Teams) != 2 {
+				t.Fatalf("teams = %v, want rouge and bleu merged case-insensitively", lobby.Teams)
+			}
+			break
+		}
+	}
+
+	write(t, ctx, alice, "buzz", nil)
+	readUntil(t, ctx, ctrl, "buzz-accepted", nil)
+	write(t, ctx, ctrl, "validate", map[string]bool{"correct": false})
+	readUntil(t, ctx, ctrl, "buzz-available", nil)
+
+	// alice's team already tried: bob is excluded with her, carol takes the hand.
+	write(t, ctx, bob, "buzz", nil)
+	write(t, ctx, carol, "buzz", nil)
+	var acc struct {
+		Name string `json:"name"`
+		Team string `json:"team"`
+	}
+	readUntil(t, ctx, ctrl, "buzz-accepted", &acc)
+	if acc.Name != "carol" || acc.Team != "bleu" {
+		t.Fatalf("winner = %+v, want carol of bleu", acc)
+	}
+
+	write(t, ctx, ctrl, "validate", map[string]bool{"correct": true})
+	var score struct {
+		Name  string `json:"name"`
+		Team  string `json:"team"`
+		Score int    `json:"score"`
+	}
+	readUntil(t, ctx, ctrl, "score-update", &score)
+	if score.Team != "bleu" || score.Name != "" || score.Score < 95 {
+		t.Fatalf("score = %+v, want team bleu credited", score)
+	}
+}
+
 func TestSpeedPoints(t *testing.T) {
 	cases := []struct {
 		elapsed time.Duration
