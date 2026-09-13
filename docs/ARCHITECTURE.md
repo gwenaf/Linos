@@ -90,8 +90,8 @@ Exemples :
 
 - **Wi-Fi existant** : IP locale obtenue via `net.Dial("udp", "8.8.8.8:80")` puis `LocalAddr()`. Aucun paquet n'est envoyé ; le système choisit l'interface de sortie.
 - **Point d'accès Windows (v1)** : l'utilisateur active le partage de connexion manuellement. Linos détecte l'interface correspondante (généralement `192.168.137.1`) et l'utilise dans le QR code.
-- **Tunnel Cloudflare** : URL publique du tunnel.
-- Le QR code contient toujours l'adresse IP (ou l'URL du tunnel). `blindtest.local` (mDNS) n'est qu'un confort pour la saisie manuelle : sa résolution n'est pas fiable sur tous les Android.
+- Pas de tunnel ni de jeu à distance : la latence 4G fausse le buzz face aux joueurs en Wi-Fi, et l'installation de `cloudflared` ajoute une étape.
+- Le QR code contient toujours l'adresse IP. `blindtest.local` (mDNS) n'est qu'un confort pour la saisie manuelle : sa résolution n'est pas fiable sur tous les Android.
 
 ### Jetons de session
 
@@ -100,8 +100,23 @@ Exemples :
 - Le jeton identifie le joueur et porte son rôle. Il permet la reconnexion.
 - Le QR code de reconnexion affiché pour un joueur déconnecté contient un **jeton de reconnexion à usage unique**, valable 2 minutes.
 
+### Pare-feu
+
+Au premier lancement, Windows demande l'autorisation d'accès réseau pour l'exécutable. Un refus crée une règle de blocage. Une autorisation limitée aux réseaux privés bloque les téléphones si le Wi-Fi est classé « public ». La règle étant liée au chemin de l'exécutable, un changement de lettre de la clé USB redéclenche la demande. Un test de connexion depuis le PC hôte ne traverse pas le pare-feu : seul un téléphone peut le vérifier.
+
+v1 :
+
+1. **Profil réseau** : lecture via `Get-NetConnectionProfile` (sans droits admin). Profil « public » : avertissement sur l'écran hôte avec la marche à suivre.
+2. **Aucun joueur après 30 s** : aide affichée sur l'écran hôte (pare-feu, même réseau Wi-Fi, isolation des clients sur les réseaux invités).
+3. **Bouton « Autoriser dans le pare-feu »** : ajoute une règle entrante pour l'exécutable (`netsh advfirewall firewall add rule … program=<chemin>`) via une élévation UAC.
+
+macOS affiche une demande similaire, répétée à chaque version pour une application non signée. Linux n'a généralement pas de pare-feu actif par défaut.
+
+### Docker
+
+Image destinée aux utilisateurs avancés qui installent Linos sur leur serveur. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur.
+
 ## 6. Points de vigilance
 
-- **Pare-feu Windows** : au premier lancement, Windows demande l'autorisation d'accès réseau. En cas de refus, ou si le réseau est classé « public », les téléphones ne peuvent pas se connecter. Linos doit détecter l'absence de connexion entrante et guider l'utilisateur.
-- **HTTP en réseau local** : l'API Wake Lock exige HTTPS. Les téléphones peuvent se mettre en veille et couper le WebSocket ; la reconnexion par jeton couvre ce cas. En mode tunnel (HTTPS), le problème disparaît.
+- **HTTP en réseau local** : l'API Wake Lock exige HTTPS. Les téléphones peuvent se mettre en veille et couper le WebSocket ; la reconnexion par jeton couvre ce cas.
 - **Lecture automatique** : les navigateurs bloquent le son sans interaction préalable. La page `/host` doit obtenir un clic (par exemple « Lancer la partie ») avant la première piste.

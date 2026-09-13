@@ -17,7 +17,7 @@ cmd/linos/          point d'entrée, câblage uniquement
 internal/server/    HTTP, routes, service du front embarqué
 internal/ws/        protocole temps réel : join, buzz, validate, score
 internal/qrcode/    QR code de l'URL de connexion
-internal/network/   3 modes (WiFi, hotspot Windows, tunnel Cloudflare) : ne change que l'URL
+internal/network/   2 modes (WiFi, hotspot Windows) : ne change que l'URL ; pare-feu
 internal/mdns/      annonce blindtest.local
 internal/pack/      gamepacks (manifest.json + médias locaux)
 internal/tags/      lecture tags ID3 à l'import

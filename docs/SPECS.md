@@ -29,13 +29,12 @@ Un binaire unique lance un serveur local. L'écran hôte et les téléphones son
 - Un seul `.exe` (~12 Mo), exécutable depuis une clé USB, sans installation
 - Ouvre le navigateur système sur `localhost`
 
-## Réseau — 3 modes, même code
+## Réseau — 2 modes, même code
 
 1. **WiFi existant** — mode par défaut, aucun droit admin
 2. **Hotspot Windows partagé** — optionnel, activé manuellement par l'utilisateur en v1, détecté par Linos
-3. **Tunnel Cloudflare** — joueurs en 4G, aucun réseau commun requis
 
-Seule la génération de l'URL du QR code change entre les trois.
+Seule la génération de l'URL du QR code change entre les deux. Tous les joueurs sont sur le même réseau local : pas de tunnel ni de jeu à distance (latence inéquitable au buzz, étape d'installation supplémentaire).
 
 ## Contenu
 
