@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey } from './ui'
+import { Answers, Qr, Results, Scores, scoreKey, scoreTable } from './ui'
 
 const conn = connect('host')
 
@@ -18,6 +18,8 @@ const paused = signal(false)
 const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const elapsed = signal(0)
+// Index of a track the server already started before this page joined: no media-started to send, seek instead.
+let startedBefore = -1
 
 fetch('/api/join')
   .then((r) => r.json())
@@ -39,6 +41,22 @@ effect(() => {
 setInterval(() => (elapsed.value = clockNow()), 100)
 
 conn.on('lobby-update', (d) => (lobby.value = d))
+conn.on('state', (d) => {
+  lobby.value = d.lobby
+  title.value = d.configured?.title ?? ''
+  round.value = d.round ?? null
+  scores.value = scoreTable(d.scores)
+  paused.value = !!d.paused
+  holder.value = d.holder ?? null
+  ended.value = d.trackEnd ?? null
+  live.value = d.trackState === 'live' || d.trackState === 'ended'
+  startedBefore = live.value ? d.track.index : -1
+  // Set after the signals: the clock effect may already have run with the previous base.
+  clockBase = d.elapsed ?? 0
+  clockSince = clockRunning.value ? performance.now() : null
+  elapsed.value = clockBase
+  track.value = d.track ?? null
+})
 conn.on('configured', (d) => (title.value = d.title))
 conn.on('game-start', (d) => {
   title.value = d.title
@@ -125,7 +143,7 @@ function revealAt(steps: Data[] | null, t: number): Reveal {
 function TrackView() {
   const t = track.value
   const video = useRef<HTMLVideoElement>(null)
-  const reported = useRef(-1)
+  const reported = useRef(startedBefore)
   const isImage = /\.(jpe?g|png|webp|gif|avif)$/i.test(t.media)
   const reveal = ended.value ? { audio: true, video: true, blur: 0 } : revealAt(t.reveal, elapsed.value)
 
@@ -139,7 +157,8 @@ function TrackView() {
     const v = video.current
     if (!v) return
     v.onloadedmetadata = () => {
-      v.currentTime = t.start
+      // Joining mid-track: resume the media where the server clock is.
+      v.currentTime = t.start + (startedBefore === t.index ? clockNow() * t.playbackRate : 0)
       v.playbackRate = t.playbackRate
       v.play().catch(() => {})
     }

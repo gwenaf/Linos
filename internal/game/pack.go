@@ -88,17 +88,22 @@ func (r *Room) configure(c *Client, m Message) {
 		old.pack.Close()
 	}
 
+	r.broadcast(NewMessage("configured", r.configuredPayload()))
+}
+
+func (r *Room) configuredPayload() map[string]any {
+	lp := r.loaded.Load()
 	rounds := []string{}
-	for _, rd := range p.Manifest.Rounds {
+	for _, rd := range lp.pack.Manifest.Rounds {
 		rounds = append(rounds, rd.Name)
 	}
-	r.broadcast(NewMessage("configured", map[string]any{
-		"pack":   d.Pack,
-		"title":  p.Manifest.Title,
-		"author": p.Manifest.Author,
+	return map[string]any{
+		"pack":   lp.name,
+		"title":  lp.pack.Manifest.Title,
+		"author": lp.pack.Manifest.Author,
 		"rounds": rounds,
-		"tracks": len(p.Manifest.Tracks),
-	}))
+		"tracks": len(lp.pack.Manifest.Tracks),
+	}
 }
 
 // unsupported lists the manifest features this build does not play yet, so a pack is refused rather than misplayed.

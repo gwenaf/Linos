@@ -169,6 +169,23 @@ func (r *Room) createInvite(c *Client) {
 
 // broadcastLobby sends players and teams; in the lobby it also switches between lobby and ready.
 func (r *Room) broadcastLobby() {
+	if slices.Contains(lobbyStates, r.state) {
+		connected, allReady := 0, true
+		for _, p := range r.players {
+			if p.name != "" && p.client != nil {
+				connected++
+				allReady = allReady && p.ready
+			}
+		}
+		r.state = stateLobby
+		if connected > 0 && allReady {
+			r.state = stateReady
+		}
+	}
+	r.broadcast(NewMessage("lobby-update", r.lobbyPayload()))
+}
+
+func (r *Room) lobbyPayload() map[string]any {
 	type entry struct {
 		Name      string `json:"name"`
 		Team      string `json:"team,omitempty"`
@@ -176,7 +193,6 @@ func (r *Room) broadcastLobby() {
 		Connected bool   `json:"connected"`
 	}
 	players := []entry{}
-	connected, allReady := 0, true
 	for _, p := range r.players {
 		if p.name == "" {
 			continue
@@ -185,25 +201,14 @@ func (r *Room) broadcastLobby() {
 		if p.team != nil {
 			e.Team = p.team.name
 		}
-		if e.Connected {
-			connected++
-			allReady = allReady && p.ready
-		}
 		players = append(players, e)
 	}
 	slices.SortFunc(players, func(a, b entry) int { return strings.Compare(a.Name, b.Name) })
-
-	if slices.Contains(lobbyStates, r.state) {
-		r.state = stateLobby
-		if connected > 0 && allReady {
-			r.state = stateReady
-		}
-	}
 	teams := []string{}
 	for _, t := range r.teams {
 		teams = append(teams, t.name)
 	}
-	r.broadcast(NewMessage("lobby-update", map[string]any{"players": players, "teams": teams, "state": r.state}))
+	return map[string]any{"players": players, "teams": teams, "state": r.state}
 }
 
 func (r *Room) validName(c *Client, raw string) (string, bool) {

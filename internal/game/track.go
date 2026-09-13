@@ -133,10 +133,7 @@ func (r *Room) nextTrack() {
 	}
 	it := r.playlist[r.current]
 	if it.round >= 0 && (r.current == 0 || r.playlist[r.current-1].round != it.round) {
-		r.broadcast(NewMessage("round-start", map[string]any{
-			"index": it.round,
-			"name":  r.loaded.Load().pack.Manifest.Rounds[it.round].Name,
-		}))
+		r.broadcast(NewMessage("round-start", r.roundPayload()))
 	}
 
 	slog.Info("track started", "index", r.current, "track", it.track.ID)
@@ -158,8 +155,13 @@ type publicGuess struct {
 	ChoicesAt float64  `json:"choicesAt,omitempty"`
 }
 
-// sendTrackStart tells players what to guess, the host how to play the media, and control the answers too.
-func (r *Room) sendTrackStart() {
+func (r *Room) roundPayload() map[string]any {
+	i := r.playlist[r.current].round
+	return map[string]any{"index": i, "name": r.loaded.Load().pack.Manifest.Rounds[i].Name}
+}
+
+// trackPayload tells players what to guess, the host how to play the media, and control the answers too.
+func (r *Room) trackPayload(role string) map[string]any {
 	it := r.playlist[r.current]
 	t := it.track
 	guesses := make([]publicGuess, len(t.Guesses))
@@ -186,15 +188,18 @@ func (r *Room) sendTrackStart() {
 	control := maps.Clone(host)
 	control["guesses"] = t.Guesses
 
+	switch role {
+	case RoleHost:
+		return host
+	case RoleControl:
+		return control
+	}
+	return public
+}
+
+func (r *Room) sendTrackStart() {
 	for c := range r.clients {
-		switch c.role {
-		case RoleHost:
-			r.send(c, NewMessage("track-start", host))
-		case RoleControl:
-			r.send(c, NewMessage("track-start", control))
-		default:
-			r.send(c, NewMessage("track-start", public))
-		}
+		r.send(c, NewMessage("track-start", r.trackPayload(c.role)))
 	}
 }
 
@@ -212,9 +217,13 @@ func (r *Room) mediaStarted(c *Client) {
 	r.armTrackTimer()
 }
 
-// elapsed is the track time actually played, finished pauses and answers excluded; only called while the clock runs.
+// elapsed is the track time actually played: pauses and answers, finished or ongoing, excluded.
 func (r *Room) elapsed() time.Duration {
-	return time.Since(r.trackStart) - r.paused
+	e := time.Since(r.trackStart) - r.paused
+	if r.clockStops > 0 {
+		e -= time.Since(r.pausedAt)
+	}
+	return e
 }
 
 func (r *Room) armTrackTimer() {
@@ -237,13 +246,14 @@ func (r *Room) trackTimer(seq int) {
 func (r *Room) endTrack(reason string) {
 	slog.Info("track ended", "index", r.current, "reason", reason)
 	r.trackState = trackEnded
+	r.endReason = reason
 	r.turn++
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false
-	r.broadcast(NewMessage("track-end", map[string]any{
-		"index":   r.current,
-		"reason":  reason,
-		"guesses": r.track().Guesses,
-	}))
+	r.broadcast(NewMessage("track-end", r.trackEndPayload()))
+}
+
+func (r *Room) trackEndPayload() map[string]any {
+	return map[string]any{"index": r.current, "reason": r.endReason, "guesses": r.track().Guesses}
 }
 
 func (r *Room) skip() {

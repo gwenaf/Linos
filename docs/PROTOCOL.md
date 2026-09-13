@@ -8,7 +8,7 @@
 - Le serveur identifie toujours l'émetteur par sa connexion et son jeton de session, jamais par un pseudonyme fourni dans le message. Le rôle est attribué par le serveur, jamais déclaré par le client.
 - Le serveur horodate à la réception les messages `buzz` et `answer`. Les points de rapidité sont calculés avec cet horodatage.
 - Le chrono d'une piste démarre quand l'écran hôte envoie `media-started`, et non à l'envoi de `track-start`. Le temps de chargement du média ne pénalise donc personne.
-- Reconnexion : le client renvoie `join` avec son jeton, puis le serveur répond `state` avec l'état complet de la partie.
+- Reconnexion : le client renvoie `join` avec son jeton ; après `welcome`, le serveur envoie `state`, l'état complet de la partie. Une page rechargée reprend donc là où en est la partie.
 
 ## Pages et rôles
 
@@ -32,7 +32,7 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 - `join` (C → S) : rejoindre la partie. Contient `token` (jeton de session ou de maître du jeu) s'il existe, ou `invite` (code d'invitation maître du jeu). Un seul salon par serveur : aucun nom de salon. Invitation inconnue ou expirée : `error` `invalid-invite`.
 - `welcome` (S → C) : réponse à `join`. Contient le jeton (nouveau ou confirmé), le rôle attribué par le serveur, le pseudonyme éventuel et l'état de la partie (`state`).
 - `master-invite` (C → S, `control`) : créer une invitation maître du jeu. Le serveur répond `master-invite` avec `code` et `expiresIn` (secondes).
-- `state` (S → C) : état complet de la partie. Envoyé après une reconnexion ou sur demande.
+- `state` (S → C) : état complet de la partie, envoyé juste après chaque `welcome`, adapté au rôle. Contient toujours `state`, `lobby` (comme `lobby-update`), `scores` (comme `results` de `game-end`) et `configured` si un pack est choisi. Pendant une partie, contient aussi `track` (comme `track-start` pour ce rôle), `trackState` (`loading`, `live`, `ended`), `found` (éléments trouvés), `round`, `paused` (comme `game-paused`), `holder` (comme `buzz-accepted`), `elapsed` (secondes de piste jouées, si `live`), `trackEnd` (comme `track-end`, si `ended`) et, pour un joueur, `canBuzz`.
 - `leave` (C → S) : quitter le salon.
 - `identify` (C → S) : choisir son pseudonyme.
 - `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe ; l'équipe est créée si elle n'existe pas (8 au maximum, noms comparés sans tenir compte de la casse). Un nom vide quitte l'équipe. Une équipe vide et sans points est supprimée.

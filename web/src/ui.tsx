@@ -18,6 +18,11 @@ export function scoreKey(d: Data): string {
   return d.team ?? d.name
 }
 
+/** Builds the score table from the results list of a state snapshot. */
+export function scoreTable(results: Data[]): Record<string, number> {
+  return Object.fromEntries(results.map((r) => [scoreKey(r), r.score]))
+}
+
 export function Scores({ scores }: { scores: Record<string, number> }) {
   const rows = Object.entries(scores).sort((a, b) => b[1] - a[1])
   if (rows.length === 0) return null

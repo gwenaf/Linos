@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, isLocalPage, store, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey } from './ui'
+import { Answers, Qr, Results, Scores, scoreKey, scoreTable } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -62,8 +62,20 @@ conn.on('welcome', (d) => {
   }
   if (d.token) store(MASTER_TOKEN, d.token)
   if (invite) history.replaceState(null, '', '/control')
-  state.value = d.state
   conn.send('list-packs')
+})
+// Sent after every join: a reloaded or reconnected page resumes the game as it is.
+conn.on('state', (d) => {
+  state.value = d.state
+  lobby.value = d.lobby
+  configured.value = d.configured ?? null
+  round.value = d.round ?? null
+  track.value = d.track ?? null
+  trackEnded.value = d.trackState === 'ended'
+  found.value = d.found ?? []
+  holder.value = d.holder ?? null
+  paused.value = d.paused ?? null
+  scores.value = scoreTable(d.scores)
 })
 conn.on('lobby-update', (d) => {
   lobby.value = d

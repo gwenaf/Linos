@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, store, type Data } from './ws'
-import { Answers, Results, scoreKey } from './ui'
+import { Answers, Results, scoreKey, scoreTable } from './ui'
 
 const TOKEN = 'linos-player'
 const conn = connect('player', () => ({ token: store(TOKEN) ?? '' }))
@@ -23,6 +23,16 @@ conn.on('welcome', (d) => {
   store(TOKEN, d.token)
   me.value = d.name
   state.value = d.state
+})
+conn.on('state', (d) => {
+  state.value = d.state
+  lobby.value = d.lobby
+  track.value = d.track ?? null
+  ended.value = d.trackEnd ?? null
+  holder.value = d.holder ?? null
+  canBuzz.value = !!d.canBuzz
+  paused.value = !!d.paused
+  scores.value = scoreTable(d.scores)
 })
 conn.on('lobby-update', (d) => {
   lobby.value = d

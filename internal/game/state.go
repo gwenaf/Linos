@@ -59,8 +59,7 @@ func (r *Room) freeze(state string) {
 func (r *Room) resume() {
 	if !r.hostConnected() {
 		r.state = stateTechnicalPause
-		_, players := r.missing()
-		r.broadcastTechnicalPause(true, players)
+		r.broadcast(NewMessage("game-paused", r.pausedPayload()))
 		return
 	}
 	for _, p := range r.players {
@@ -94,7 +93,7 @@ func (r *Room) connectionsChanged() {
 			if r.state == stateInProgress {
 				r.freeze(stateTechnicalPause)
 			}
-			r.broadcastTechnicalPause(host, players)
+			r.broadcast(NewMessage("game-paused", r.pausedPayload()))
 		case r.state == stateTechnicalPause:
 			r.resume()
 		}
@@ -112,12 +111,13 @@ func (r *Room) missing() (host bool, players []string) {
 	return !r.hostConnected(), players
 }
 
-func (r *Room) broadcastTechnicalPause(hostMissing bool, missingPlayers []string) {
-	r.broadcast(NewMessage("game-paused", map[string]any{
-		"reason":         "technical",
-		"hostMissing":    hostMissing,
-		"missingPlayers": missingPlayers,
-	}))
+// pausedPayload describes the current pause: requested by control, or technical with who is missing.
+func (r *Room) pausedPayload() map[string]any {
+	if r.state == statePaused {
+		return map[string]any{"reason": "control"}
+	}
+	host, players := r.missing()
+	return map[string]any{"reason": "technical", "hostMissing": host, "missingPlayers": players}
 }
 
 // endGame publishes the results and returns everyone to the lobby, not ready.

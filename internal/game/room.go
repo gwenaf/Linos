@@ -81,6 +81,7 @@ type Room struct {
 	rules      rules
 	trackState string
 	found      map[string]bool
+	endReason  string
 	// trackSeq invalidates track timers from previous tracks.
 	trackSeq int
 
@@ -225,7 +226,7 @@ func (r *Room) handle(e event) {
 		r.startGame(c)
 	case "pause":
 		r.freeze(statePaused)
-		r.broadcast(NewMessage("game-paused", map[string]string{"reason": "control"}))
+		r.broadcast(NewMessage("game-paused", r.pausedPayload()))
 	case "resume":
 		r.resume()
 	case "validate":
@@ -286,6 +287,7 @@ func (r *Room) join(c *Client, m Message) {
 	}
 	slog.Info("client joined", append(c.logAttrs(), "state", r.state)...)
 	r.send(c, NewMessage("welcome", welcome))
+	r.send(c, NewMessage("state", r.snapshot(c)))
 	r.connectionsChanged()
 }
 

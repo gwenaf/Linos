@@ -47,11 +47,7 @@ func (r *Room) closeBuzzWindow() {
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
 	r.stopClock()
 
-	accepted := map[string]any{"name": winner.name, "answerTime": r.rules.answerTime.Seconds()}
-	if winner.team != nil {
-		accepted["team"] = winner.team.name
-	}
-	r.broadcast(NewMessage("buzz-accepted", accepted))
+	r.broadcast(NewMessage("buzz-accepted", r.holderPayload()))
 	blocked := NewMessage("buzz-blocked", nil)
 	for _, p := range r.players {
 		if p != winner {
@@ -169,4 +165,12 @@ func (r *Room) startClock() {
 			r.armTrackTimer()
 		}
 	}
+}
+
+func (r *Room) holderPayload() map[string]any {
+	h := map[string]any{"name": r.holder.name, "answerTime": r.rules.answerTime.Seconds()}
+	if r.holder.team != nil {
+		h["team"] = r.holder.team.name
+	}
+	return h
 }
