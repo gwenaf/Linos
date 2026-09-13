@@ -17,7 +17,9 @@ Le binaire sert trois pages. Le rôle d'une connexion découle de la page et de 
 - `/control` → rôle `control` : page principale, ouverte sur le PC hôte. L'hôte y dirige la partie (configuration, lancement, pause, piste suivante), voit les réponses des joueurs, valide, affiche les indices et corrige les scores. Un bouton ouvre `/host` dans une nouvelle fenêtre. En validation `auto`, `control` dirige toujours la partie mais ne valide pas.
 - `/host` → rôle `host` : affichage du jeu (TV ou second écran). Joue les médias et affiche la partie, sans aucune autorité.
 - `/play` → rôle `player` : joueur sur téléphone. Il buzze, répond, choisit un thème, utilise un joker et mise.
-- Les rôles `control` et `host` ne sont accordés qu'aux connexions provenant de la machine hôte (adresse de bouclage). Toute autre connexion est `player`.
+- La page demande son rôle à la connexion : `/ws?role=control` ou `/ws?role=host` ; sans paramètre, le rôle est `player`.
+- Les rôles `control` et `host` ne sont accordés qu'aux connexions provenant de la machine hôte : adresse de bouclage **et** en-tête `Host` local (protection contre le DNS rebinding). Sinon la connexion est refusée (HTTP 403).
+- Messages réservés : `identify`, `buzz` → `player` ; `validate`, `skip` et autres commandes de pilotage → `control`. Un message hors rôle reçoit `error` avec le code `forbidden`.
 - En partie par équipes, les points sont comptés par équipe. Un buzz ou une réponse d'un membre engage toute l'équipe.
 
 ## Messages

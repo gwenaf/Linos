@@ -55,18 +55,99 @@ type welcome struct {
 	Name  string `json:"name"`
 }
 
+func joinPlayer(t *testing.T, ctx context.Context, url, name string) *websocket.Conn {
+	c := dial(t, ctx, url)
+	write(t, ctx, c, "join", nil)
+	readUntil(t, ctx, c, "welcome", nil)
+	write(t, ctx, c, "identify", map[string]string{"name": name})
+	readUntil(t, ctx, c, "lobby-update", nil)
+	return c
+}
+
+type answerResult struct {
+	Name    string `json:"name"`
+	Correct bool   `json:"correct"`
+}
+
+func TestValidate(t *testing.T) {
+	url, ctx := setup(t)
+
+	ctrl := dial(t, ctx, url+"?role=control")
+	write(t, ctx, ctrl, "join", nil)
+	var w struct {
+		Role string `json:"role"`
+	}
+	readUntil(t, ctx, ctrl, "welcome", &w)
+	if w.Role != "control" {
+		t.Fatalf("role = %q, want control", w.Role)
+	}
+	alice := joinPlayer(t, ctx, url, "alice")
+	bob := joinPlayer(t, ctx, url, "bob")
+
+	write(t, ctx, alice, "buzz", nil)
+	readUntil(t, ctx, ctrl, "buzz-accepted", nil)
+
+	write(t, ctx, alice, "validate", map[string]bool{"correct": true})
+	var e struct {
+		Code string `json:"code"`
+	}
+	readUntil(t, ctx, alice, "error", &e)
+	if e.Code != "forbidden" {
+		t.Fatalf("player validate error = %q, want forbidden", e.Code)
+	}
+
+	write(t, ctx, ctrl, "validate", map[string]bool{"correct": false})
+	var res answerResult
+	readUntil(t, ctx, ctrl, "answer-result", &res)
+	if res != (answerResult{"alice", false}) {
+		t.Fatalf("result = %+v, want alice wrong", res)
+	}
+	readUntil(t, ctx, ctrl, "buzz-available", nil)
+
+	// alice already tried: only bob can take the hand.
+	write(t, ctx, alice, "buzz", nil)
+	write(t, ctx, bob, "buzz", nil)
+	var acc struct {
+		Name string `json:"name"`
+	}
+	readUntil(t, ctx, ctrl, "buzz-accepted", &acc)
+	if acc.Name != "bob" {
+		t.Fatalf("second buzz winner = %q, want bob", acc.Name)
+	}
+
+	write(t, ctx, ctrl, "validate", map[string]bool{"correct": true})
+	readUntil(t, ctx, ctrl, "answer-result", &res)
+	if res != (answerResult{"bob", true}) {
+		t.Fatalf("result = %+v, want bob correct", res)
+	}
+}
+
+func TestIsLocal(t *testing.T) {
+	cases := []struct {
+		remote, host string
+		want         bool
+	}{
+		{"127.0.0.1:5000", "localhost:7777", true},
+		{"[::1]:5000", "[::1]:7777", true},
+		{"192.168.1.20:5000", "192.168.1.10:7777", false},
+		{"127.0.0.1:5000", "evil.example:7777", false},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest("GET", "/ws", nil)
+		req.RemoteAddr, req.Host = tc.remote, tc.host
+		if got := isLocal(req); got != tc.want {
+			t.Errorf("isLocal(%s, %s) = %v, want %v", tc.remote, tc.host, got, tc.want)
+		}
+	}
+}
+
 func TestBuzzPicksOneWinner(t *testing.T) {
 	url, ctx := setup(t)
 
 	names := []string{"alice", "bob"}
 	conns := make([]*websocket.Conn, len(names))
 	for i, name := range names {
-		c := dial(t, ctx, url)
-		write(t, ctx, c, "join", nil)
-		readUntil(t, ctx, c, "welcome", nil)
-		write(t, ctx, c, "identify", map[string]string{"name": name})
-		readUntil(t, ctx, c, "lobby-update", nil)
-		conns[i] = c
+		conns[i] = joinPlayer(t, ctx, url, name)
 	}
 
 	for _, c := range conns {

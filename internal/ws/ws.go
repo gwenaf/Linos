@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	mrand "math/rand/v2"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -21,6 +22,19 @@ const (
 	maxNameLen = 32
 )
 
+const (
+	roleControl = "control"
+	roleHost    = "host"
+	rolePlayer  = "player"
+)
+
+var requiredRole = map[string]string{
+	"identify": rolePlayer,
+	"buzz":     rolePlayer,
+	"validate": roleControl,
+	"skip":     roleControl,
+}
+
 type Message struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data,omitempty"`
@@ -35,7 +49,9 @@ func newMessage(typ string, data any) Message {
 }
 
 type conn struct {
+	role   string
 	send   chan Message
+	joined bool
 	closed bool
 	player *player
 }
@@ -60,29 +76,51 @@ type event struct {
 	conn *conn
 	msg  Message
 	at   time.Time
+	turn int
 }
 
 // Room state is only touched by the run goroutine; everything else goes through events.
 type Room struct {
 	events  chan event
+	conns   map[*conn]struct{}
 	players map[string]*player
 
 	buzzOpen   bool
 	candidates []*player
 	firstBuzz  time.Time
+	holder     *player
+	attempted  map[*player]bool
+	// turn invalidates pending timers whenever the buzz state moves on.
+	turn int
 }
 
 func NewRoom() *Room {
 	r := &Room{
-		events:   make(chan event, 64),
-		players:  map[string]*player{},
-		buzzOpen: true,
+		events:    make(chan event, 64),
+		conns:     map[*conn]struct{}{},
+		players:   map[string]*player{},
+		buzzOpen:  true,
+		attempted: map[*player]bool{},
 	}
 	go r.run()
 	return r
 }
 
 func (r *Room) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	role := rolePlayer
+	switch q := req.URL.Query().Get("role"); q {
+	case "", rolePlayer:
+	case roleControl, roleHost:
+		if !isLocal(req) {
+			http.Error(w, "role reserved to the host machine", http.StatusForbidden)
+			return
+		}
+		role = q
+	default:
+		http.Error(w, "unknown role", http.StatusBadRequest)
+		return
+	}
+
 	ws, err := websocket.Accept(w, req, nil)
 	if err != nil {
 		return
@@ -90,7 +128,7 @@ func (r *Room) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	defer ws.CloseNow()
 
 	ctx := req.Context()
-	c := &conn{send: make(chan Message, 16)}
+	c := &conn{role: role, send: make(chan Message, 16)}
 
 	go func() {
 		for m := range c.send {
@@ -112,6 +150,19 @@ func (r *Room) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.events <- event{kind: evLeave, conn: c}
 }
 
+// isLocal also checks the Host header so a DNS-rebinding page opened on the host PC cannot claim control.
+func isLocal(req *http.Request) bool {
+	remote, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil || !net.ParseIP(remote).IsLoopback() {
+		return false
+	}
+	host := req.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == "localhost" || net.ParseIP(host).IsLoopback()
+}
+
 func (r *Room) run() {
 	for e := range r.events {
 		switch e.kind {
@@ -120,44 +171,43 @@ func (r *Room) run() {
 		case evLeave:
 			r.drop(e.conn)
 		case evBuzzWindowClosed:
-			r.closeBuzzWindow()
+			if e.turn == r.turn {
+				r.closeBuzzWindow()
+			}
 		case evAnswerTimeout:
-			r.buzzOpen = true
-			r.broadcast(newMessage("buzz-available", nil))
+			if e.turn == r.turn && r.holder != nil {
+				r.resolveAnswer(false)
+			}
 		}
 	}
 }
 
 func (r *Room) handleMessage(e event) {
 	c := e.conn
+	if e.msg.Type != "join" && !c.joined {
+		r.sendError(c, "not-joined", "join first")
+		return
+	}
+	if want, ok := requiredRole[e.msg.Type]; ok && c.role != want {
+		r.sendError(c, "forbidden", e.msg.Type+" is not allowed for "+c.role)
+		return
+	}
+
 	switch e.msg.Type {
 	case "join":
-		var d struct {
-			Token string `json:"token"`
-		}
-		if !r.decode(c, e.msg, &d) {
+		if c.role == rolePlayer && !r.joinPlayer(c, e.msg) {
 			return
 		}
-		p := r.players[d.Token]
-		if p == nil {
-			p = &player{token: newToken()}
-			r.players[p.token] = p
+		c.joined = true
+		r.conns[c] = struct{}{}
+		welcome := map[string]string{"role": c.role}
+		if c.player != nil {
+			welcome["token"] = c.player.token
+			welcome["name"] = c.player.name
 		}
-		if c.player != nil && c.player != p && c.player.conn == c {
-			c.player.conn = nil
-		}
-		if p.conn != nil && p.conn != c {
-			r.drop(p.conn)
-		}
-		p.conn = c
-		c.player = p
-		r.send(c, newMessage("welcome", map[string]string{"token": p.token, "name": p.name}))
+		r.send(c, newMessage("welcome", welcome))
 
 	case "identify":
-		if c.player == nil {
-			r.sendError(c, "not-joined", "join first")
-			return
-		}
 		var d struct {
 			Name string `json:"name"`
 		}
@@ -180,25 +230,73 @@ func (r *Room) handleMessage(e event) {
 
 	case "buzz":
 		p := c.player
-		if p == nil || p.name == "" {
-			r.sendError(c, "not-identified", "join and identify first")
+		if p.name == "" {
+			r.sendError(c, "not-identified", "identify first")
 			return
 		}
-		if !r.buzzOpen || slices.Contains(r.candidates, p) {
+		if !r.buzzOpen || r.attempted[p] || slices.Contains(r.candidates, p) {
 			return
 		}
 		if len(r.candidates) == 0 {
 			r.firstBuzz = e.at
-			time.AfterFunc(buzzWindow, func() { r.events <- event{kind: evBuzzWindowClosed} })
+			turn := r.turn
+			time.AfterFunc(buzzWindow, func() { r.events <- event{kind: evBuzzWindowClosed, turn: turn} })
 		} else if e.at.Sub(r.firstBuzz) > buzzWindow {
 			// ponytail: a buzz received in-window but queued after the window closed is dropped; sub-millisecond race.
 			return
 		}
 		r.candidates = append(r.candidates, p)
 
+	case "validate":
+		if r.holder == nil {
+			r.sendError(c, "no-pending-answer", "no answer to validate")
+			return
+		}
+		var d struct {
+			Correct *bool `json:"correct"`
+		}
+		if !r.decode(c, e.msg, &d) {
+			return
+		}
+		if d.Correct == nil {
+			r.sendError(c, "bad-data", "validate requires correct")
+			return
+		}
+		r.resolveAnswer(*d.Correct)
+
+	case "skip":
+		r.holder = nil
+		r.candidates = nil
+		r.attempted = map[*player]bool{}
+		r.turn++
+		r.openBuzz()
+
 	default:
 		r.sendError(c, "unknown-type", "unknown message type")
 	}
+}
+
+func (r *Room) joinPlayer(c *conn, m Message) bool {
+	var d struct {
+		Token string `json:"token"`
+	}
+	if !r.decode(c, m, &d) {
+		return false
+	}
+	p := r.players[d.Token]
+	if p == nil {
+		p = &player{token: newToken()}
+		r.players[p.token] = p
+	}
+	if c.player != nil && c.player != p && c.player.conn == c {
+		c.player.conn = nil
+	}
+	if p.conn != nil && p.conn != c {
+		r.drop(p.conn)
+	}
+	p.conn = c
+	c.player = p
+	return true
 }
 
 func (r *Room) closeBuzzWindow() {
@@ -208,6 +306,9 @@ func (r *Room) closeBuzzWindow() {
 	winner := r.candidates[mrand.IntN(len(r.candidates))]
 	r.candidates = nil
 	r.buzzOpen = false
+	r.holder = winner
+	r.attempted[winner] = true
+	r.turn++
 
 	r.broadcast(newMessage("buzz-accepted", map[string]any{
 		"name":       winner.name,
@@ -219,7 +320,28 @@ func (r *Room) closeBuzzWindow() {
 			r.send(p.conn, blocked)
 		}
 	}
-	time.AfterFunc(answerTime, func() { r.events <- event{kind: evAnswerTimeout} })
+	turn := r.turn
+	time.AfterFunc(answerTime, func() { r.events <- event{kind: evAnswerTimeout, turn: turn} })
+}
+
+func (r *Room) resolveAnswer(correct bool) {
+	name := r.holder.name
+	r.holder = nil
+	r.turn++
+	r.broadcast(newMessage("answer-result", map[string]any{"name": name, "correct": correct}))
+	if !correct {
+		r.openBuzz()
+	}
+}
+
+func (r *Room) openBuzz() {
+	r.buzzOpen = true
+	available := newMessage("buzz-available", nil)
+	for c := range r.conns {
+		if c.player == nil || !r.attempted[c.player] {
+			r.send(c, available)
+		}
+	}
 }
 
 func (r *Room) broadcastLobby() {
@@ -257,8 +379,8 @@ func (r *Room) send(c *conn, m Message) {
 }
 
 func (r *Room) broadcast(m Message) {
-	for _, p := range r.players {
-		r.send(p.conn, m)
+	for c := range r.conns {
+		r.send(c, m)
 	}
 }
 
@@ -272,6 +394,7 @@ func (r *Room) drop(c *conn) {
 	}
 	c.closed = true
 	close(c.send)
+	delete(r.conns, c)
 	if c.player != nil && c.player.conn == c {
 		c.player.conn = nil
 	}
