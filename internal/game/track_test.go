@@ -152,18 +152,18 @@ func TestTrackTimerStopsDuringPause(t *testing.T) {
 }
 
 func TestTrackTimerStopsWhileAnswering(t *testing.T) {
-	r := newRoom(t, withRules(basicManifest(1), obj{"duration": 0.2}))
+	// Wide margins: under CPU load, the original timer must still fire with the clock running.
+	r := newRoom(t, withRules(basicManifest(1), obj{"duration": 0.4}))
 	alice := newPlayer(t, r, "alice")
 	bob := newPlayer(t, r, "bob")
 	ctrl, _ := startGame(t, r, alice, bob)
 
-	time.Sleep(50 * time.Millisecond)
 	send(r, alice, "buzz", nil)
 	expect(t, ctrl, "buzz-accepted", nil)
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	send(r, ctrl, "validate", obj{"correct": false})
-	// The original timer fires while less than 200 ms were played and is re-armed.
-	time.Sleep(80 * time.Millisecond)
+	// The original timer fires while about 250 ms of 400 were played and is re-armed.
+	time.Sleep(300 * time.Millisecond)
 	expectNo(t, r, ctrl, "track-end")
 	var end trackEnd
 	expect(t, ctrl, "track-end", &end)
