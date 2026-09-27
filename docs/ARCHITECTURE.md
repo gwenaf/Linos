@@ -38,13 +38,13 @@ Exemples :
 - Le serveur sert les médias avec `http.ServeContent`, qui gère les requêtes HTTP Range. Le navigateur ne télécharge que les portions nécessaires pour atteindre `start` et lire l'extrait.
 - Les médias d'un gamepack sont lus sans extraction (voir « Gamepack »).
 - Les fichiers importés par glisser-déposer sont lus directement depuis le disque.
-- Formats garantis : MP3, AAC, MP4 (H.264/AAC), JPEG, PNG, WebP. Un format non lisible par le navigateur affiche « format non supporté, utiliser le builder ».
+- Formats garantis : MP3, AAC, MP4 (H.264/AAC), JPEG, PNG, WebP. Un format non lisible par le navigateur affiche « format non supporté, convertir avec ffmpeg ».
 
 ### Gamepack
 
 - Deux formes acceptées dès la v1, avec le même contenu :
   - fichier `.linospack` : une archive ZIP (ZIP64 supporté), forme de distribution ;
-  - dossier non zippé contenant `manifest.json` : forme d'édition (création à la main, builder avant export).
+  - dossier non zippé contenant `manifest.json` : forme d'édition (création à la main ou `/edit` avant export).
 - Les deux formes sont lues par le même code via `fs.FS` (`zip.Reader` ou `os.DirFS`). Seul l'accès direct aux médias diffère : `http.ServeContent` sur le fichier pour un dossier, `DataOffset` + `io.SectionReader` pour un `.linospack`.
 - Bibliothèque : dossier `packs/` à côté de l'exécutable, pour rester portable sur clé USB.
 - Organisation :
@@ -55,7 +55,7 @@ Exemples :
   cover.jpg       facultatif, déclaré dans le manifest (champ "cover")
   ```
 
-- Lecture d'un média : `archive/zip` (`DataOffset`) + `io.SectionReader`, servi par `http.ServeContent` (requêtes Range). Un média compressé dans l'archive est refusé au chargement (le builder écrit en `Store`) : pas de cache d'extraction.
+- Lecture d'un média : `archive/zip` (`DataOffset`) + `io.SectionReader`, servi par `http.ServeContent` (requêtes Range). Un média compressé dans l'archive est refusé au chargement (l'export écrit en `Store`) : pas de cache d'extraction.
 - Validation au chargement :
   - chemins de médias relatifs uniquement, `..` et chemins absolus refusés (protection zip slip) ;
   - chaque `id` de piste ou de thème référencé existe, chaque fichier média est présent ;
@@ -73,12 +73,13 @@ Exemples :
 - Toutes les règles du manifest sont jouées ; seules les combinaisons impossibles sont refusées au `configure` (voir `PROTOCOL.md`). Le manifest d'exemple est jouable (vérifié par un test).
 - Essais en mode buzz, par élément à deviner : `attempts` par équipe, `rebound` (`none` termine la piste, `others` donne la priorité aux autres, `all` laisse tout le monde rebuzzer), `wrongLockout` (blocage en temps de piste joué), `reboundBonus` pour une bonne réponse après une erreur. Tout est remis à zéro quand un élément est trouvé. En réponses simultanées, `attempts` et `wrongLockout` s'appliquent par équipe et par élément.
 
-### Builder (projet séparé)
+### Éditeur `/edit`
 
-- Linos ne découpe ni ne convertit aucun média : pas de ffmpeg dans le binaire.
-- Le builder embarque ffmpeg. Il découpe les extraits sans réencodage (un clip de 2 Go devient un extrait de quelques Mo) et convertit les formats non compatibles vers H.264/AAC.
-- Le builder importe des playlists pour générer le manifest.
-- Contrat commun : JSON Schema du manifest, publié dans ce dépôt.
+- Intégré à Linos : mêmes types Go (`internal/pack`) que le jeu, donc aucun contrat à synchroniser.
+- Réservé au PC hôte (`hostOnly`, comme `/control`) ; `LINOS_EDIT=off` le désactive (serveur auto-hébergé).
+- N'écrit que dans les packs dossier de `packs/`. Un `.linospack` est en lecture seule.
+- Effets (flou, pixelisation, image fixe…) : données du manifest appliquées en direct par `/host`, jamais incrustées dans le média.
+- Export : ffmpeg facultatif, cherché dans le PATH, découpe chaque média aux segments joués (fondu de sortie compris) puis écrit le `.linospack`. Pas de ffmpeg dans le binaire. Sans ffmpeg, l'export copie les médias entiers.
 
 ### Sources de médias
 

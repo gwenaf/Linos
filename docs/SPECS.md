@@ -42,7 +42,8 @@ Seule la génération de l'URL du QR code change entre les deux. Tous les joueur
 - Un gamepack décrit des pistes, des thèmes et des manches (thèmes et manches facultatifs), ainsi que les règles par défaut
 - Import rapide par glisser-déposer d'un dossier de fichiers audio dans `/control` : pack généré dans `packs/` depuis les tags, jouable aussitôt
 - Aucune plateforme de streaming dans le jeu : leurs conditions interdisent l'usage en jeu ou quiz (Spotify, Apple, SoundCloud)
-- Création de gamepacks : builder dans un projet séparé, avec import de playlists. Contrat commun : JSON Schema du manifest, publié dans ce dépôt
+- Création de gamepacks : éditeur `/edit` intégré (PC hôte uniquement, désactivable par `LINOS_EDIT=off`). Manches, thèmes, règles, minutage, image fixe, effets visuels (flou, pixelisation…) appliqués en direct à la lecture
+- Export : ffmpeg (facultatif, trouvé dans le PATH) découpe les médias aux segments utilisés pour réduire le `.linospack`
 
 ## Jeu
 
