@@ -196,6 +196,14 @@ small {
   min-height: 50vh;
 }
 
+.stage canvas {
+  width: 100%;
+  height: 60vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+  transition: filter 0.5s;
+}
+
 .stage video,
 .stage img {
   max-width: 100%;

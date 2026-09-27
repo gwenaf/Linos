@@ -49,6 +49,9 @@ func TestValidationErrors(t *testing.T) {
 		{"media path", func(m obj) { firstTrack(m)["media"] = `media\a.mp3` }, "not a valid relative path"},
 		{"media missing", func(m obj) { firstTrack(m)["media"] = "b.mp3" }, `tracks[0].media "b.mp3" not found`},
 		{"negative start", func(m obj) { firstTrack(m)["start"] = -1 }, "cannot be negative"},
+		{"reveal negative", func(m obj) { firstTrack(m)["reveal"] = list{obj{"at": 0, "pixelate": -2}} }, "reveal[0]: at, blur and pixelate cannot be negative"},
+		{"reveal grayscale", func(m obj) { firstTrack(m)["reveal"] = list{obj{"grayscale": 2}} }, "reveal[0].grayscale must be between 0 and 1"},
+		{"reveal image", func(m obj) { firstTrack(m)["reveal"] = list{obj{"image": ""}, obj{"image": "cover.jpg"}} }, `reveal[1].image "cover.jpg" not found`},
 		{"no guesses", func(m obj) { firstTrack(m)["guesses"] = list{} }, "at least one guess is required"},
 		{"guess label", func(m obj) { firstGuess(m)["label"] = "" }, "guesses[0].label is required"},
 		{"guess label duplicate", func(m obj) {

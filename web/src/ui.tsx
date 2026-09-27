@@ -1,3 +1,5 @@
+import type { RefObject } from 'preact'
+import { useEffect, useRef } from 'preact/hooks'
 import type { Data } from './ws'
 
 export function Qr({ url, caption }: { url: string; caption: string }) {
@@ -88,4 +90,86 @@ export async function droppedFiles(entries: FileSystemEntry[]): Promise<File[]> 
   }
   for (const entry of entries) await walk(entry)
   return files
+}
+
+export const IMAGE = /\.(jpe?g|png|webp|gif|avif)$/i
+export const VIDEO = /\.(mp4|m4v|webm)$/i
+
+export type Effects = { audio: boolean; video: boolean; blur: number; pixelate: number; grayscale: number; image: string }
+const numeric = ['blur', 'pixelate', 'grayscale'] as const
+
+// effectsAt applies the reveal steps at t seconds of play: switches take the last step reached,
+// numeric effects move linearly from the last step setting them to the next one.
+export function effectsAt(steps: Data[] | null | undefined, t: number): Effects {
+  const at = (s: Data) => s.at ?? 0
+  const sorted = [...(steps ?? [])].sort((a, b) => at(a) - at(b))
+  const e: Effects = { audio: true, video: true, blur: 0, pixelate: 0, grayscale: 0, image: '' }
+  for (const s of sorted.filter((s) => at(s) <= t)) {
+    if (s.audio != null) e.audio = s.audio
+    if (s.video != null) e.video = s.video
+    if (s.image != null) e.image = s.image
+  }
+  for (const k of numeric) {
+    const set = sorted.filter((s) => s[k] != null)
+    const prev = set.filter((s) => at(s) <= t).at(-1)
+    const next = set.find((s) => at(s) > t)
+    if (prev) e[k] = next ? prev[k] + ((next[k] - prev[k]) * (t - at(prev))) / (at(next) - at(prev)) : prev[k]
+  }
+  return e
+}
+
+// finalEffects unveils the media once the track ends; an audio track keeps its picture.
+export function finalEffects(steps: Data[] | null | undefined, media: string): Effects {
+  const image = VIDEO.test(media) ? '' : effectsAt(steps, Infinity).image
+  return { audio: true, video: true, blur: 0, pixelate: 0, grayscale: 0, image }
+}
+
+// Stage shows a track's media with its effects. Pixelation draws the picture shrunk on a canvas,
+// scaled back up without smoothing.
+export function Stage(props: {
+  src: string
+  effects: Effects
+  imageUrl: (name: string) => string
+  mediaRef?: RefObject<HTMLVideoElement>
+  onStarted?: () => void
+}) {
+  const { src, effects: e, imageUrl, onStarted } = props
+  const ownRef = useRef<HTMLVideoElement>(null)
+  const video = props.mediaRef ?? ownRef
+  const picture = useRef<HTMLImageElement>(null)
+  const canvas = useRef<HTMLCanvasElement>(null)
+  const pixelate = useRef(e.pixelate)
+  pixelate.current = e.pixelate
+  const isImage = IMAGE.test(src)
+  const showsPicture = isImage || !!e.image
+  const pixelated = e.pixelate > 1
+
+  useEffect(() => {
+    if (!pixelated) return
+    let frame = 0
+    const draw = () => {
+      const c = canvas.current
+      const img = picture.current
+      const v = video.current
+      const [source, w, h] = showsPicture && img ? [img, img.naturalWidth, img.naturalHeight] : v ? [v, v.videoWidth, v.videoHeight] : [null, 0, 0]
+      if (c && source && w > 0) {
+        c.width = Math.max(1, Math.round(w / pixelate.current))
+        c.height = Math.max(1, Math.round(h / pixelate.current))
+        c.getContext('2d')!.drawImage(source, 0, 0, c.width, c.height)
+      }
+      frame = requestAnimationFrame(draw)
+    }
+    draw()
+    return () => cancelAnimationFrame(frame)
+  }, [pixelated, showsPicture, src])
+
+  const style = { filter: `blur(${e.blur}px) grayscale(${e.grayscale})`, visibility: e.video ? 'visible' : 'hidden' }
+  const hidden = { display: 'none' }
+  return (
+    <div class="stage">
+      {showsPicture && <img ref={picture} src={e.image ? imageUrl(e.image) : src} style={pixelated ? hidden : style} onLoad={isImage ? onStarted : undefined} />}
+      {!isImage && <video ref={video} src={src} muted={!e.audio} style={showsPicture || pixelated ? hidden : style} onPlaying={onStarted} />}
+      {pixelated && <canvas ref={canvas} style={style} />}
+    </div>
+  )
 }

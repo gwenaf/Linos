@@ -84,6 +84,10 @@
       "media": "media/03.mp3",
       "start": 60,
       "playbackRate": 1.25,
+      "reveal": [
+        { "at": 0, "image": "media/04.jpg", "pixelate": 32 },
+        { "at": 25, "pixelate": 1 }
+      ],
       "guesses": [
         {
           "label": "Titre",
@@ -100,9 +104,9 @@
       "media": "media/04.jpg",
       "duration": 20,
       "reveal": [
-        { "at": 0, "blur": 30 },
+        { "at": 0, "blur": 30, "grayscale": 1 },
         { "at": 10, "blur": 10 },
-        { "at": 18, "blur": 0 }
+        { "at": 18, "blur": 0, "grayscale": 0 }
       ],
       "guesses": [
         { "label": "Album", "type": "text", "answers": ["Disintegration"] }

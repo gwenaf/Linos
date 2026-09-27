@@ -82,6 +82,9 @@ func (p *Pack) validate() error {
 		if t.Start < 0 || t.Duration < 0 || t.PlaybackRate < 0 {
 			v.fail("%s: start, duration and playbackRate cannot be negative", at)
 		}
+		for j, r := range t.Reveal {
+			v.reveal(fmt.Sprintf("%s.reveal[%d]", at, j), r)
+		}
 		if len(t.Guesses) == 0 {
 			v.fail("%s: at least one guess is required", at)
 		}
@@ -119,6 +122,19 @@ func (p *Pack) validate() error {
 		}
 	}
 	return errors.Join(v.errs...)
+}
+
+func (v *validator) reveal(at string, r Reveal) {
+	neg := func(x *float64) bool { return x != nil && *x < 0 }
+	if r.At < 0 || neg(r.Blur) || neg(r.Pixelate) {
+		v.fail("%s: at, blur and pixelate cannot be negative", at)
+	}
+	if r.Grayscale != nil && (*r.Grayscale < 0 || *r.Grayscale > 1) {
+		v.fail("%s.grayscale must be between 0 and 1", at)
+	}
+	if r.Image != nil && *r.Image != "" {
+		v.file(at+".image", *r.Image)
+	}
 }
 
 func (v *validator) guess(at string, g Guess) {

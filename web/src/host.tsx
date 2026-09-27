@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Qr, Results, Scores, Stage, effectsAt, finalEffects, scoreKey, scoreTable, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -200,25 +200,13 @@ function LobbyView() {
   )
 }
 
-type Reveal = { audio: boolean; video: boolean; blur: number }
-
-function revealAt(steps: Data[] | null, t: number): Reveal {
-  const r: Reveal = { audio: true, video: true, blur: 0 }
-  for (const s of [...(steps ?? [])].sort((a, b) => a.at - b.at)) {
-    if (s.at > t) break
-    if (s.audio != null) r.audio = s.audio
-    if (s.video != null) r.video = s.video
-    if (s.blur != null) r.blur = s.blur
-  }
-  return r
-}
+const mediaUrl = (name: string) => '/media/' + name.split('/').map(encodeURIComponent).join('/')
 
 function TrackView() {
   const t = track.value
   const video = useRef<HTMLVideoElement>(null)
   const reported = useRef(startedBefore)
-  const isImage = /\.(jpe?g|png|webp|gif|avif)$/i.test(t.media)
-  const reveal = ended.value ? { audio: true, video: true, blur: 0 } : revealAt(t.reveal, elapsed.value)
+  const effects = ended.value ? finalEffects(t.reveal, t.media) : effectsAt(t.reveal, elapsed.value)
 
   const reportStarted = () => {
     if (reported.current === t.index) return
@@ -249,7 +237,6 @@ function TrackView() {
     [t.index],
   )
 
-  const style = { filter: `blur(${reveal.blur}px)`, visibility: reveal.video ? 'visible' : 'hidden' }
   return (
     <>
       <header class="track">
@@ -260,13 +247,7 @@ function TrackView() {
         {t.owner && <span>Thème de {unitName(t.owner)}</span>}
         {live.value && !ended.value && <span class="countdown">{Math.max(0, Math.ceil(t.duration - elapsed.value))}</span>}
       </header>
-      <div class="stage">
-        {isImage ? (
-          <img key={t.index} src={t.media} style={style} onLoad={reportStarted} />
-        ) : (
-          <video key={t.index} ref={video} src={t.media} muted={!reveal.audio} style={style} onPlaying={reportStarted} />
-        )}
-      </div>
+      <Stage key={t.index} src={t.media} effects={effects} imageUrl={mediaUrl} mediaRef={video} onStarted={reportStarted} />
       {holder.value && (
         <p class="holder">
           {holder.value.name}

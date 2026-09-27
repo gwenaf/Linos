@@ -83,7 +83,7 @@ Une « équipe » désigne ci-dessous une équipe (`team`) ou un joueur sans éq
   - Les joueurs ne reçoivent que `label`, `type` et, pour un `choice`, `choices` et `choicesAt`. `control` reçoit les éléments complets, réponses comprises.
 - `media-started` (C → S, `host`) : la lecture a réellement commencé. Le chrono de la piste démarre et le buzz s'ouvre. Hors chargement : `error` `wrong-state`.
 - `timer-start` (S → C) : chrono lancé. Contient `index` et `duration`. Le chrono s'arrête pendant les pauses et pendant qu'un joueur a la main ; la piste se termine quand `duration` a été jouée.
-- `reveal` (S → C, `host`) : étape de dévoilement (son, image, flou).
+- `reveal` (S → C, `host`) : étape de dévoilement. Champs d'une étape du manifest : `at`, `audio`, `video`, `blur` (px), `pixelate` (taille des pixels), `grayscale` (0 à 1), `image` (photo fixe à la place de la vidéo, `""` la retire). Flou, pixelisation et gris varient linéairement jusqu'à l'étape suivante qui les fixe. En fin de piste tout est dévoilé ; un audio garde sa photo.
 - `hint` (S → C) : indice à afficher, déclenché par le chrono (manifest) ou par `show-hint`.
 - `show-hint` (C → S, `control`) : afficher un indice immédiatement.
 - `choices` (S → C) : réponses proposées pour un élément de type `choice`.

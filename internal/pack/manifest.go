@@ -100,11 +100,17 @@ type Track struct {
 	Hints        []Hint   `json:"hints,omitempty"`
 }
 
+// Reveal is a step of the effects /host applies live: numeric effects move linearly
+// to the next step setting them, the others switch at At.
 type Reveal struct {
-	At    float64  `json:"at,omitempty"`
-	Audio *bool    `json:"audio,omitempty"`
-	Video *bool    `json:"video,omitempty"`
-	Blur  *float64 `json:"blur,omitempty"`
+	At        float64  `json:"at,omitempty"`
+	Audio     *bool    `json:"audio,omitempty"`
+	Video     *bool    `json:"video,omitempty"`
+	Blur      *float64 `json:"blur,omitempty"`
+	Pixelate  *float64 `json:"pixelate,omitempty"`
+	Grayscale *float64 `json:"grayscale,omitempty"`
+	// Image is a pack picture shown instead of the video frames; "" removes it.
+	Image *string `json:"image,omitempty"`
 }
 
 type Guess struct {

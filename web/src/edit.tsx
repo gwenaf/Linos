@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
-import { droppedFiles } from './ui'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { IMAGE, Stage, droppedFiles, effectsAt, finalEffects } from './ui'
 import type { Data } from './ws'
 
 // Pack editor: folder packs of packs/, host machine only. The manifest is edited as loaded,
@@ -16,8 +17,6 @@ const newName = signal('')
 const dragging = signal(false)
 
 const MEDIA = /\.(mp3|m4a|aac|ogg|opus|flac|wav|mp4|m4v|webm|jpe?g|png|webp|gif)$/i
-const IMAGE = /\.(jpe?g|png|webp|gif)$/i
-const VIDEO = /\.(mp4|m4v|webm)$/i
 const DEFAULT_DURATION = 30
 
 const packUrl = (suffix = '') => `/api/edit/${encodeURIComponent(current.value)}${suffix}`
@@ -537,34 +536,114 @@ function Tracks() {
   )
 }
 
-// Preview plays the extract as the game will: from start, for its duration, at its playback rate.
+// Preview plays the extract as the game will: from start, for its duration, at its playback rate,
+// with its effects; steps edited here apply live.
 function Preview() {
   const t = preview.value
-  if (!t) return null
+  const video = useRef<HTMLVideoElement>(null)
+  const [now, setNow] = useState(0)
+  const [run, setRun] = useState(0)
   const start = t.start ?? 0
-  const end = start + (t.duration ?? manifest.value.rules?.duration ?? DEFAULT_DURATION)
-  const props = {
-    key: `${t.media}-${start}-${end}`,
-    src: mediaUrl(t.media),
-    controls: true,
-    autoPlay: true,
-    onLoadedMetadata: (e: Event) => {
-      const el = e.target as HTMLMediaElement
-      el.currentTime = start
-      el.playbackRate = t.playbackRate ?? 1
-    },
-    onTimeUpdate: (e: Event) => {
-      const el = e.target as HTMLMediaElement
-      if (el.currentTime >= end) el.pause()
-    },
-  }
+  const rate = t.playbackRate ?? 1
+  const duration = t.duration ?? manifest.value.rules?.duration ?? DEFAULT_DURATION
+
+  useEffect(() => {
+    const began = performance.now()
+    const v = video.current
+    if (v) {
+      v.onloadedmetadata = () => {
+        v.currentTime = start
+        v.playbackRate = rate
+        v.play().catch(() => {})
+      }
+    }
+    // Pictures have no media clock: the preview counts wall time.
+    const id = setInterval(() => {
+      const elapsed = v ? (v.currentTime - start) / rate : (performance.now() - began) / 1000
+      if (elapsed >= duration) v?.pause()
+      setNow(Math.min(elapsed, duration))
+    }, 100)
+    return () => clearInterval(id)
+  }, [t.media, start, rate, duration, run])
+
+  const steps: Data[] = t.reveal ?? []
+  const effects = now >= duration ? finalEffects(steps, t.media) : effectsAt(steps, now)
+  const images = media.value.filter((x) => IMAGE.test(x))
   return (
     <section>
       <h2>
-        Aperçu de {t.id} : {start} s à {end} s
+        Aperçu de {t.id} : {now.toFixed(1)} / {duration} s{now >= duration && ' (fin, réponse dévoilée)'}
       </h2>
-      {VIDEO.test(t.media) ? <video {...props} /> : <audio {...props} />}
-      <button onClick={() => (preview.value = null)}>Fermer</button>
+      <Stage key={`${t.media}-${start}-${run}`} src={mediaUrl(t.media)} effects={effects} imageUrl={mediaUrl} mediaRef={video} />
+      <button onClick={() => setRun(run + 1)}>Rejouer</button> <button onClick={() => (preview.value = null)}>Fermer</button>
+      <h3>Effets</h3>
+      <p>
+        <small>
+          Chaque étape s'applique à son instant ; flou, pixelisation et gris varient progressivement jusqu'à l'étape suivante qui les fixe. Vide :
+          inchangé.
+        </small>
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>À (s)</th>
+            <th>Son</th>
+            <th>Image</th>
+            <th>Flou (px)</th>
+            <th>Pixels (px)</th>
+            <th>Gris (0 à 1)</th>
+            <th>Photo fixe</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {steps.map((step, i) => (
+            <tr key={i}>
+              <td>
+                <Num o={step} path={['at']} label="" />
+              </td>
+              <td>
+                <Pick o={step} path={['audio']} label="" options={yesNo} bool />
+              </td>
+              <td>
+                <Pick o={step} path={['video']} label="" options={yesNo} bool />
+              </td>
+              <td>
+                <Num o={step} path={['blur']} label="" />
+              </td>
+              <td>
+                <Num o={step} path={['pixelate']} label="" />
+              </td>
+              <td>
+                <Num o={step} path={['grayscale']} label="" />
+              </td>
+              <td>
+                <select
+                  value={step.image === undefined ? '-' : step.image}
+                  onChange={(e) =>
+                    update(() => {
+                      if (value(e) === '-') delete step.image
+                      else step.image = value(e)
+                    })
+                  }
+                >
+                  <option value="-">—</option>
+                  <option value="">aucune</option>
+                  {images.map((x) => (
+                    <option key={x} value={x}>
+                      {x}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <button onClick={() => update(() => steps.splice(i, 1))}>×</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button onClick={() => update(() => (t.reveal = [...steps, { at: Math.round(now * 10) / 10 }]))}>+ étape à {now.toFixed(1)} s</button>
     </section>
   )
 }
