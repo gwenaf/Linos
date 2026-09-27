@@ -1,0 +1,31 @@
+# Publishes linos.exe on each version tag (git tag v0.1.0 && git push origin v0.1.0).
+# Tag-only trigger and one Linux runner (cross-compiles, cheapest runner) keep Actions usage minimal.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: go vet ./... && go test ./...
+      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o linos.exe ./cmd/linos
+      - run: gh release create "$GITHUB_REF_NAME" linos.exe --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
