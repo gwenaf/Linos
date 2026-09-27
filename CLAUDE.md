@@ -50,7 +50,8 @@ go vet ./...
 go test -cover ./...
 cd web && npm install && npm run build && cd ..   # front, à rebuilder avant go build
 CGO_ENABLED=0 go build -o bin/linos ./cmd/linos   # packs à placer dans bin/packs/
-git tag v0.1.0 && git push origin v0.1.0     # release GitHub : linos.exe via .github/workflows/release.yml
+cd web && npm run e2e && cd ..                    # test de fumée navigateur (Chrome ou Edge, CHROME_PATH sinon)
+git tag v0.1.0 && git push origin v0.1.0     # release : binaires Windows/macOS/Linux + image Docker (release.yml)
 ```
 
 Variables d'environnement :
