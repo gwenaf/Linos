@@ -567,6 +567,7 @@ function Preview() {
   }, [t.media, start, rate, duration, run])
 
   const steps: Data[] = t.reveal ?? []
+  const hints: Data[] = t.hints ?? []
   const effects = now >= duration ? finalEffects(steps, t.media) : effectsAt(steps, now)
   const images = media.value.filter((x) => IMAGE.test(x))
   return (
@@ -575,6 +576,13 @@ function Preview() {
         Aperçu de {t.id} : {now.toFixed(1)} / {duration} s{now >= duration && ' (fin, réponse dévoilée)'}
       </h2>
       <Stage key={`${t.media}-${start}-${run}`} src={mediaUrl(t.media)} effects={effects} imageUrl={mediaUrl} mediaRef={video} />
+      {hints
+        .filter((h) => (h.at ?? 0) <= now && h.text)
+        .map((h, i) => (
+          <p class="hint" key={i}>
+            {h.text}
+          </p>
+        ))}
       <button onClick={() => setRun(run + 1)}>Rejouer</button> <button onClick={() => (preview.value = null)}>Fermer</button>
       <h3>Effets</h3>
       <p>
@@ -644,6 +652,15 @@ function Preview() {
         </tbody>
       </table>
       <button onClick={() => update(() => (t.reveal = [...steps, { at: Math.round(now * 10) / 10 }]))}>+ étape à {now.toFixed(1)} s</button>
+      <h3>Indices</h3>
+      {hints.map((h, i) => (
+        <div key={i}>
+          <Num o={h} path={['at']} label="À (s)" />
+          <Text o={h} path={['text']} label="Texte" />
+          <button onClick={() => update(() => hints.splice(i, 1))}>×</button>
+        </div>
+      ))}
+      <button onClick={() => update(() => (t.hints = [...hints, { at: Math.round(now * 10) / 10, text: '' }]))}>+ indice à {now.toFixed(1)} s</button>
     </section>
   )
 }
