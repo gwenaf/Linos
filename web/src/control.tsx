@@ -28,7 +28,7 @@ const paused = signal<Data>(null)
 const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const joinUrls = signal<string[]>([])
-const inviteUrl = signal('')
+const inviteQr = signal<{ url: string; caption: string } | null>(null)
 const controlMode = signal('master')
 // Answers typed on phones: the holder's pending answer (buzz mode) and everything answered (simultaneous mode).
 const holderAnswer = signal<Data>(null)
@@ -179,9 +179,18 @@ conn.on('configured', (d) => {
   controlMode.value = d.control
 })
 conn.on('answer-submitted', (d) => (holderAnswer.value = d))
+const base = () => joinUrls.value[0]?.replace(/\/play$/, '') ?? location.origin
 conn.on('master-invite', (d) => {
-  const base = joinUrls.value[0]?.replace(/\/play$/, '') ?? location.origin
-  inviteUrl.value = `${base}/control?invite=${d.code}`
+  inviteQr.value = {
+    url: `${base()}/control?invite=${d.code}`,
+    caption: 'Scannez avec le téléphone du maître du jeu (valable 2 minutes, usage unique)',
+  }
+})
+conn.on('reconnect-invite', (d) => {
+  inviteQr.value = {
+    url: `${base()}/play?invite=${d.code}`,
+    caption: `Scannez avec le téléphone de ${d.name} pour reprendre sa place (valable 2 minutes, usage unique)`,
+  }
 })
 conn.on('game-start', () => {
   state.value = 'in-progress'
@@ -248,9 +257,9 @@ export default function Control() {
           {conn.error.value}
         </p>
       )}
-      {inviteUrl.value && (
-        <section onClick={() => (inviteUrl.value = '')}>
-          <Qr url={inviteUrl.value} caption="Scannez avec le téléphone du maître du jeu (valable 2 minutes, usage unique)" />
+      {inviteQr.value && (
+        <section onClick={() => (inviteQr.value = null)}>
+          <Qr url={inviteQr.value.url} caption={inviteQr.value.caption} />
         </section>
       )}
       {inLobby ? <Lobby /> : <Game />}
@@ -329,6 +338,9 @@ function Lobby() {
                 <td>{p.team}</td>
                 <td>{p.connected ? (p.ready ? 'Prêt' : 'Pas prêt') : 'Déconnecté'}</td>
                 <td>
+                  {!p.connected && (
+                    <button onClick={() => conn.send('reconnect-invite', { name: p.name })}>Reconnecter</button>
+                  )}
                   <button onClick={() => conn.send('kick', { name: p.name })}>Exclure</button>
                 </td>
               </tr>
@@ -432,7 +444,9 @@ function Game() {
               {p.hostMissing && <p>L'écran de jeu est déconnecté : rouvrez-le.</p>}
               {p.missingPlayers.map((name: string) => (
                 <p key={name}>
-                  {name} est déconnecté. <button onClick={() => conn.send('kick', { name })}>Exclure</button>
+                  {name} est déconnecté.{' '}
+                  <button onClick={() => conn.send('reconnect-invite', { name })}>Reconnecter</button>
+                  <button onClick={() => conn.send('kick', { name })}>Exclure</button>
                 </p>
               ))}
             </>

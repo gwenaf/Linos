@@ -71,7 +71,7 @@ type Room struct {
 	state   string
 
 	masters   map[string]bool
-	invites   map[string]time.Time
+	invites   map[string]invite
 	inviteTTL time.Duration
 	// tolerated players may stay disconnected without pausing the game, until they reconnect.
 	tolerated map[*player]bool
@@ -136,7 +136,7 @@ func NewRoom(packsDir string) *Room {
 		players:   map[string]*player{},
 		state:     stateLobby,
 		masters:   map[string]bool{},
-		invites:   map[string]time.Time{},
+		invites:   map[string]invite{},
 		inviteTTL: 2 * time.Minute,
 		tolerated: map[*player]bool{},
 		packsDir:  packsDir,
@@ -193,27 +193,28 @@ var commands = map[string]struct {
 	role   string
 	states []string
 }{
-	"identify":      {RolePlayer, nil},
-	"join-team":     {RolePlayer, lobbyStates},
-	"ready":         {RolePlayer, lobbyStates},
-	"buzz":          {RolePlayer, []string{stateInProgress}},
-	"answer":        {RolePlayer, []string{stateInProgress}},
-	"pick-theme":    {RolePlayer, []string{stateInProgress}},
-	"wager":         {RolePlayer, []string{stateInProgress}},
-	"use-joker":     {RolePlayer, []string{stateInProgress}},
-	"media-started": {RoleHost, []string{stateInProgress}},
-	"list-packs":    {RoleControl, nil},
-	"configure":     {RoleControl, lobbyStates},
-	"start-game":    {RoleControl, []string{stateReady}},
-	"pause":         {RoleControl, []string{stateInProgress}},
-	"resume":        {RoleControl, []string{statePaused, stateTechnicalPause}},
-	"validate":      {RoleControl, runningStates},
-	"skip":          {RoleControl, []string{stateInProgress}},
-	"score-adjust":  {RoleControl, nil},
-	"kick":          {RoleControl, nil},
-	"master-invite": {RoleControl, nil},
-	"end-game":      {RoleControl, runningStates},
-	"abort":         {RoleControl, runningStates},
+	"identify":         {RolePlayer, nil},
+	"join-team":        {RolePlayer, lobbyStates},
+	"ready":            {RolePlayer, lobbyStates},
+	"buzz":             {RolePlayer, []string{stateInProgress}},
+	"answer":           {RolePlayer, []string{stateInProgress}},
+	"pick-theme":       {RolePlayer, []string{stateInProgress}},
+	"wager":            {RolePlayer, []string{stateInProgress}},
+	"use-joker":        {RolePlayer, []string{stateInProgress}},
+	"media-started":    {RoleHost, []string{stateInProgress}},
+	"list-packs":       {RoleControl, nil},
+	"configure":        {RoleControl, lobbyStates},
+	"start-game":       {RoleControl, []string{stateReady}},
+	"pause":            {RoleControl, []string{stateInProgress}},
+	"resume":           {RoleControl, []string{statePaused, stateTechnicalPause}},
+	"validate":         {RoleControl, runningStates},
+	"skip":             {RoleControl, []string{stateInProgress}},
+	"score-adjust":     {RoleControl, nil},
+	"kick":             {RoleControl, nil},
+	"master-invite":    {RoleControl, nil},
+	"reconnect-invite": {RoleControl, nil},
+	"end-game":         {RoleControl, runningStates},
+	"abort":            {RoleControl, runningStates},
 }
 
 func (r *Room) handle(e event) {
@@ -282,7 +283,9 @@ func (r *Room) handle(e event) {
 	case "kick":
 		r.kick(c, e.msg)
 	case "master-invite":
-		r.createInvite(c)
+		r.createInvite(c, "master-invite", nil)
+	case "reconnect-invite":
+		r.reconnectInvite(c, e.msg)
 	case "end-game":
 		r.endGame("ended")
 	case "abort":
@@ -301,12 +304,17 @@ func (r *Room) join(c *Client, m Message) {
 	if c.role == RolePlayer {
 		switch {
 		case d.Invite != "":
-			expiry, ok := r.invites[d.Invite]
+			inv, ok := r.invites[d.Invite]
 			delete(r.invites, d.Invite)
-			if !ok || time.Now().After(expiry) {
-				slog.Warn("gamemaster invite refused", "known", ok)
+			// A reconnection invite dies with its player, if kicked meanwhile.
+			if !ok || time.Now().After(inv.expiry) || inv.player != nil && r.players[inv.player.token] != inv.player {
+				slog.Warn("invite refused", "known", ok)
 				r.sendError(c, "invalid-invite", "invite unknown or expired")
 				return
+			}
+			if inv.player != nil {
+				r.joinPlayer(c, inv.player.token)
+				break
 			}
 			r.detach(c)
 			c.role, c.token = RoleControl, newToken()

@@ -3,7 +3,9 @@ import { connect, store, type Data } from './ws'
 import { Answers, Results, scoreKey, scoreTable, unitName } from './ui'
 
 const TOKEN = 'linos-player'
-const conn = connect('player', () => ({ token: store(TOKEN) ?? '' }))
+// A reconnection invite (QR code shown by control) replaces a lost token, once.
+let invite = new URLSearchParams(location.search).get('invite')
+const conn = connect('player', () => (invite ? { invite } : { token: store(TOKEN) ?? '' }))
 
 const me = signal('')
 const pendingName = signal('')
@@ -39,6 +41,8 @@ setInterval(() => tick.value++, 500)
 
 conn.on('welcome', (d) => {
   store(TOKEN, d.token)
+  if (invite) history.replaceState(null, '', '/play')
+  invite = null
   me.value = d.name
   state.value = d.state
 })
@@ -94,7 +98,15 @@ conn.on('lobby-update', (d) => {
     pendingName.value = ''
   }
 })
-conn.on('error', () => (pendingName.value = ''))
+conn.on('error', (d) => {
+  pendingName.value = ''
+  // Stale invite: join with the stored token instead; conn.error tells why.
+  if (d.code === 'invalid-invite') {
+    invite = null
+    history.replaceState(null, '', '/play')
+    conn.send('join', { token: store(TOKEN) ?? '' })
+  }
+})
 conn.on('game-start', (d) => {
   state.value = 'in-progress'
   results.value = null

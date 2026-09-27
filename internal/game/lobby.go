@@ -175,11 +175,37 @@ func (r *Room) unitsChanged(left any) {
 	}
 }
 
-func (r *Room) createInvite(c *Client) {
-	slog.Info("gamemaster invite created")
+// invite is a single-use join code: a gamemaster invite, or a player's reconnection invite.
+type invite struct {
+	expiry time.Time
+	player *player
+}
+
+func (r *Room) createInvite(c *Client, typ string, p *player) {
+	slog.Info("invite created", "type", typ)
 	code := newToken()
-	r.invites[code] = time.Now().Add(r.inviteTTL)
-	r.send(c, NewMessage("master-invite", map[string]any{"code": code, "expiresIn": r.inviteTTL.Seconds()}))
+	r.invites[code] = invite{time.Now().Add(r.inviteTTL), p}
+	d := map[string]any{"code": code, "expiresIn": r.inviteTTL.Seconds()}
+	if p != nil {
+		d["name"] = p.name
+	}
+	r.send(c, NewMessage(typ, d))
+}
+
+// reconnectInvite lets a player whose phone lost its token take their place back.
+func (r *Room) reconnectInvite(c *Client, m Message) {
+	var d struct {
+		Name string `json:"name"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	p := r.playerByName(d.Name)
+	if p == nil {
+		r.sendError(c, "unknown-player", "no player named "+d.Name)
+		return
+	}
+	r.createInvite(c, "reconnect-invite", p)
 }
 
 // broadcastLobby sends players and teams; in the lobby it also switches between lobby and ready.

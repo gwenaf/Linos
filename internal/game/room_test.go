@@ -363,3 +363,49 @@ func TestLogPanic(t *testing.T) {
 		t.Fatalf("repanicked = %v, log = %s", repanicked, out)
 	}
 }
+
+func TestReconnectInvite(t *testing.T) {
+	r := newRoom(t, nil)
+	ctrl := newControl(t, r)
+	alice := newPlayer(t, r, "alice")
+	bob := newPlayer(t, r, "bob")
+	r.Disconnect(alice.Client)
+
+	send(r, ctrl, "reconnect-invite", "x")
+	expectError(t, ctrl, "bad-data")
+	send(r, ctrl, "reconnect-invite", map[string]string{"name": "nobody"})
+	expectError(t, ctrl, "unknown-player")
+	send(r, ctrl, "reconnect-invite", map[string]string{"name": "alice"})
+	var inv struct {
+		Code      string  `json:"code"`
+		Name      string  `json:"name"`
+		ExpiresIn float64 `json:"expiresIn"`
+	}
+	expect(t, ctrl, "reconnect-invite", &inv)
+	if inv.Code == "" || inv.Name != "alice" || inv.ExpiresIn != 120 {
+		t.Fatalf("invite = %+v, want alice's code valid 120 s", inv)
+	}
+
+	// The phone lost its token: it opened /play as a new player, then scans the invite.
+	phone := join(r, RolePlayer, nil)
+	expect(t, phone, "welcome", nil)
+	send(r, phone, "join", map[string]string{"invite": inv.Code})
+	var w struct {
+		Role string `json:"role"`
+		Name string `json:"name"`
+	}
+	expect(t, phone, "welcome", &w)
+	if w.Role != RolePlayer || w.Name != "alice" {
+		t.Fatalf("welcome = %+v, want player alice", w)
+	}
+	reuse := join(r, RolePlayer, map[string]string{"invite": inv.Code})
+	expectError(t, reuse, "invalid-invite")
+
+	// An invite dies with its player.
+	send(r, ctrl, "reconnect-invite", map[string]string{"name": "bob"})
+	expect(t, ctrl, "reconnect-invite", &inv)
+	send(r, ctrl, "kick", map[string]string{"name": "bob"})
+	expect(t, bob, "kicked", nil)
+	late := join(r, RolePlayer, map[string]string{"invite": inv.Code})
+	expectError(t, late, "invalid-invite")
+}
