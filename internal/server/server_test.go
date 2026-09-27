@@ -184,6 +184,13 @@ func TestNetworkHelpers(t *testing.T) {
 	}
 }
 
+func TestStart(t *testing.T) {
+	// The real launcher, on a harmless program.
+	if err := Start("go", "version"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestImport(t *testing.T) {
 	room := game.NewRoom(t.TempDir())
 	h := New(room, web, false)

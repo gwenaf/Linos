@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gwenaf/linos/internal/pack"
@@ -126,9 +128,44 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 		writeJSON(w, map[string]any{"file": name, "cut": cut, "size": info.Size()})
 	})))
 
+	// A web page cannot open a local folder: the server shows the pack, or its export, in the file manager.
+	mux.HandleFunc("POST /api/edit/{pack}/reveal", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
+		target := dir
+		if r.URL.Query().Get("archive") != "" {
+			target += ".linospack"
+		}
+		if err := reveal(target); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
 	mux.HandleFunc("GET /api/edit/{pack}/media/{name...}", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
 		http.ServeFileFS(w, r, os.DirFS(dir), r.PathValue("name"))
 	})))
+}
+
+// Start launches a program without waiting for it. Tests replace it: the real one opens a window.
+var Start = func(name string, args ...string) error {
+	return exec.Command(name, args...).Start()
+}
+
+var goos = runtime.GOOS
+
+// reveal opens the file manager on path, selecting it where the platform allows.
+func reveal(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	switch goos {
+	case "windows":
+		return Start("explorer", "/select,"+path)
+	case "darwin":
+		return Start("open", "-R", path)
+	default:
+		return Start("xdg-open", filepath.Dir(path))
+	}
 }
 
 // withPack resolves the {pack} path value to an existing folder pack.

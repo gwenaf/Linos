@@ -106,6 +106,29 @@ func TestEditor(t *testing.T) {
 	want(do("PUT", "/api/edit/quiz", "application/json", `{"version":1,"title":""}`), http.StatusOK, "title is required")
 	want(do("POST", "/api/edit/quiz/export", "", ""), http.StatusBadRequest, "title is required")
 
+	// Reveal in the file manager, per platform; the archive only once exported.
+	var started []string
+	oldStart, oldOS := Start, goos
+	t.Cleanup(func() { Start, goos = oldStart, oldOS })
+	Start = func(name string, args ...string) error {
+		started = append(started, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	for _, os := range []string{"windows", "darwin", "linux"} {
+		goos = os
+		want(do("POST", "/api/edit/quiz/reveal", "", ""), http.StatusNoContent, "")
+	}
+	quiz := filepath.Join(packs, "quiz")
+	if want := []string{"explorer /select," + quiz, "open -R " + quiz, "xdg-open " + packs}; strings.Join(started, "|") != strings.Join(want, "|") {
+		t.Fatalf("started %q, want %q", started, want)
+	}
+	goos = "windows"
+	want(do("POST", "/api/edit/quiz/reveal?archive=1", "", ""), http.StatusNoContent, "")
+	if started[3] != "explorer /select,"+quiz+".linospack" {
+		t.Fatalf("archive reveal = %q", started[3])
+	}
+	want(do("POST", "/api/edit/stray/reveal?archive=1", "", ""), http.StatusInternalServerError, "")
+
 	// A folder whose manifest.json cannot be read or written.
 	os.MkdirAll(filepath.Join(packs, "broken", "manifest.json"), 0o755)
 	want(do("GET", "/api/edit/broken", "", ""), http.StatusInternalServerError, "")
