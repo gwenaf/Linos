@@ -306,3 +306,20 @@ small {
 .dropzone input[type='number'] {
   width: 6rem;
 }
+
+.savebar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.rules fieldset,
+details {
+  margin: 0.5rem 0;
+}
+
+details label,
+fieldset label {
+  display: inline-block;
+  margin: 0.25rem 1rem 0.25rem 0;
+}

@@ -64,7 +64,7 @@ async function create() {
 }
 
 async function save() {
-  const res = await fetch(packUrl(), { method: 'PUT', body: JSON.stringify(manifest.value) })
+  const res = await fetch(packUrl(), { method: 'PUT', body: JSON.stringify(prune(manifest.value)) })
   if (!res.ok) {
     status.value = `Échec de l'enregistrement : ${await res.text()}`
     return
@@ -79,6 +79,298 @@ function update(fn: (m: Data) => void) {
   fn(manifest.value)
   manifest.value = { ...manifest.value }
   dirty.value = true
+}
+
+const isObject = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v)
+
+// prune drops the empty objects left by cleared fields ("rules": {"answer": {}}).
+function prune(v: Data): Data {
+  if (Array.isArray(v)) return v.map(prune)
+  if (!isObject(v)) return v
+  const out: Data = {}
+  for (const [k, x] of Object.entries(v)) {
+    const p = prune(x)
+    if (p !== undefined && !(isObject(p) && Object.keys(p).length === 0)) out[k] = p
+  }
+  return out
+}
+
+// put sets a nested field of o, creating the objects on the way; an empty value removes the field,
+// so a round falls back on the pack rules and the pack on the game defaults.
+function put(o: Data, path: string[], v: unknown) {
+  update(() => {
+    const parent = path.slice(0, -1).reduce((x, k) => (x[k] ??= {}), o)
+    if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) delete parent[path[path.length - 1]]
+    else parent[path[path.length - 1]] = v
+  })
+}
+const get = (o: Data, path: string[]) => path.reduce((x, k) => x?.[k], o)
+
+// renameRef follows a renamed (or deleted, when to is undefined) track or theme id in every list referencing it.
+function renameRef(kind: 'tracks' | 'themes', from: string, to?: string) {
+  const m = manifest.value
+  const lists: (string[] | undefined)[] =
+    kind === 'tracks'
+      ? (m.rounds ?? []).map((r: Data) => r.tracks)
+      : [...(m.tracks ?? []).map((t: Data) => t.themes), ...(m.rounds ?? []).map((r: Data) => r.themes), m.game?.tiebreak?.themes]
+  for (const list of lists) {
+    const i = list?.indexOf(from) ?? -1
+    if (i < 0) continue
+    if (to) list![i] = to
+    else list!.splice(i, 1)
+  }
+}
+
+type Field = { o: Data; path: string[]; label: string }
+
+function Num({ o, path, label, int, placeholder }: Field & { int?: boolean; placeholder?: string }) {
+  return (
+    <label>
+      {label}{' '}
+      <input
+        type="number"
+        step={int ? 1 : 'any'}
+        value={get(o, path) ?? ''}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const n = optionalNumber(value(e))
+          put(o, path, int && n !== undefined ? Math.round(n) : n)
+        }}
+      />
+    </label>
+  )
+}
+
+function Text({ o, path, label }: Field) {
+  return (
+    <label>
+      {label} <input value={get(o, path) ?? ''} onChange={(e) => put(o, path, value(e).trim())} />
+    </label>
+  )
+}
+
+// Pick chooses among fixed values; the empty choice keeps the inherited or default value.
+function Pick({ o, path, label, options, bool }: Field & { options: [string, string][]; bool?: boolean }) {
+  const v = get(o, path)
+  return (
+    <label>
+      {label}{' '}
+      <select
+        value={v === undefined ? '' : String(v)}
+        onChange={(e) => {
+          const s = value(e)
+          put(o, path, bool && s !== '' ? s === 'true' : s)
+        }}
+      >
+        <option value="">—</option>
+        {options.map(([val, text]) => (
+          <option key={val} value={val}>
+            {text}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+// Ids toggles values of a list; checked values are appended, so the click order is the list order.
+function Ids({ o, path, label, options }: Field & { options: [string, string][] }) {
+  const list: string[] = get(o, path) ?? []
+  return (
+    <fieldset>
+      <legend>{label}</legend>
+      {options.length === 0 && <small>aucun</small>}
+      {options.map(([val, text]) => (
+        <label key={val}>
+          <input
+            type="checkbox"
+            checked={list.includes(val)}
+            onChange={(e) => put(o, path, (e.target as HTMLInputElement).checked ? [...list, val] : list.filter((x) => x !== val))}
+          />
+          {text}
+        </label>
+      ))}
+    </fieldset>
+  )
+}
+
+const yesNo: [string, string][] = [
+  ['true', 'oui'],
+  ['false', 'non'],
+]
+const themeOptions = (): [string, string][] => (manifest.value.themes ?? []).map((t: Data) => [t.id, t.name || t.id])
+
+// Rules edits a rules object: the pack defaults, or a round's overrides (empty fields inherit).
+function Rules({ o }: { o: Data }) {
+  const r = (...path: string[]) => ['rules', ...path]
+  const ranks: number[] | undefined = get(o, r('scoring', 'ranks'))
+  return (
+    <div class="rules">
+      <Num o={o} path={r('duration')} label="Durée d'une piste (s)" placeholder={String(DEFAULT_DURATION)} />
+      <fieldset>
+        <legend>Réponses</legend>
+        <Pick o={o} path={r('answer', 'mode')} label="Mode" options={[['buzz', 'buzz'], ['simultaneous', 'simultanées']]} />
+        <Pick o={o} path={r('answer', 'via')} label="Sur" options={[['oral', "l'oral"], ['device', 'le téléphone']]} />
+        <Num o={o} path={r('answer', 'answerTime')} label="Temps de réponse (s)" />
+        <Pick o={o} path={r('answer', 'pauseOnBuzz')} label="Pause au buzz" options={yesNo} bool />
+        <Num o={o} path={r('answer', 'attempts')} label="Essais" int />
+        <Num o={o} path={r('answer', 'wrongLockout')} label="Blocage après erreur (s)" />
+        <Pick o={o} path={r('answer', 'rebound')} label="Rebond" options={[['none', 'aucun'], ['others', 'les autres'], ['all', 'tout le monde']]} />
+        <Num o={o} path={r('answer', 'fuzziness')} label="Tolérance aux fautes (0 à 1)" />
+      </fieldset>
+      <fieldset>
+        <legend>Points</legend>
+        <Pick
+          o={o}
+          path={r('scoring', 'type')}
+          label="Barème"
+          options={[['speed', 'rapidité'], ['fixed', 'fixe'], ['rank', 'classement'], ['wager', 'mise']]}
+        />
+        <Num o={o} path={r('scoring', 'max')} label="Max" int />
+        <Num o={o} path={r('scoring', 'min')} label="Min" int />
+        <label>
+          Classement{' '}
+          <input
+            value={ranks?.join(', ') ?? ''}
+            placeholder="100, 60, 30"
+            onChange={(e) => put(o, r('scoring', 'ranks'), value(e).split(',').map((x) => x.trim()).filter(Boolean).map(Number))}
+          />
+        </label>
+        <Num o={o} path={r('scoring', 'wrongPenalty')} label="Pénalité d'erreur" int />
+        <Num o={o} path={r('scoring', 'reboundBonus')} label="Bonus de rebond" int />
+        <Num o={o} path={r('jokers', 'double')} label="Jokers double" int />
+      </fieldset>
+      <fieldset>
+        <legend>Thème choisi</legend>
+        <Num o={o} path={r('owner', 'headStart')} label="Avance du choisisseur (s)" />
+        <Pick o={o} path={r('owner', 'exclusive')} label="Exclusif" options={yesNo} bool />
+        <Num o={o} path={r('owner', 'othersBonus')} label="Bonus des autres" int />
+      </fieldset>
+    </div>
+  )
+}
+
+function General() {
+  const m = manifest.value
+  const images = media.value.filter((x) => IMAGE.test(x))
+  return (
+    <details open>
+      <summary>Pack</summary>
+      <Text o={m} path={['title']} label="Titre" />
+      <Text o={m} path={['author']} label="Auteur" />
+      <Text o={m} path={['language']} label="Langue" />
+      <Pick o={m} path={['cover']} label="Couverture" options={images.map((x) => [x, x])} />
+    </details>
+  )
+}
+
+function Game() {
+  const m = manifest.value
+  const g = ['game']
+  return (
+    <details>
+      <summary>Partie</summary>
+      <Ids o={m} path={[...g, 'control', 'allowed']} label="Contrôles possibles" options={[['master', 'maître du jeu'], ['auto', 'autonome']]} />
+      <Pick o={m} path={[...g, 'control', 'default']} label="Contrôle par défaut" options={[['master', 'maître du jeu'], ['auto', 'autonome']]} />
+      <Pick o={m} path={[...g, 'players', 'teams']} label="Équipes" options={[['none', 'non'], ['optional', 'facultatives'], ['required', 'obligatoires']]} />
+      <Num o={m} path={[...g, 'players', 'minTeams']} label="Équipes min" int />
+      <Num o={m} path={[...g, 'players', 'maxTeams']} label="Équipes max" int />
+      <Pick o={m} path={[...g, 'end', 'type']} label="Fin" options={[['rounds', 'après les manches'], ['score', 'score cible'], ['elimination', 'élimination']]} />
+      <Num o={m} path={[...g, 'end', 'target']} label="Score cible" int />
+      <Pick o={m} path={[...g, 'tiebreak', 'type']} label="Égalité" options={[['sudden-death', 'mort subite']]} />
+      <Ids o={m} path={[...g, 'tiebreak', 'themes']} label="Thèmes de la mort subite" options={themeOptions()} />
+    </details>
+  )
+}
+
+function Themes() {
+  const themes: Data[] = manifest.value.themes ?? []
+  return (
+    <details>
+      <summary>Thèmes ({themes.length})</summary>
+      {themes.map((t, i) => (
+        <div key={t.id}>
+          <code>{t.id}</code> <input value={t.name} placeholder="Nom" onChange={(e) => update(() => (t.name = value(e)))} />
+          <button
+            onClick={() =>
+              update((m) => {
+                m.themes.splice(i, 1)
+                renameRef('themes', t.id)
+              })
+            }
+          >
+            Supprimer
+          </button>
+        </div>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          const input = (e.target as HTMLFormElement).elements.namedItem('name') as HTMLInputElement
+          const name = input.value.trim()
+          const id = name.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'theme'
+          if (!name || themes.some((t) => t.id === id)) return
+          update((m) => (m.themes = [...themes, { id, name }]))
+          input.value = ''
+        }}
+      >
+        <input name="name" placeholder="Nouveau thème" /> <button>Ajouter</button>
+      </form>
+    </details>
+  )
+}
+
+function Rounds() {
+  const rounds: Data[] = manifest.value.rounds ?? []
+  const trackOptions = (): [string, string][] => (manifest.value.tracks ?? []).map((t: Data) => [t.id, t.id])
+  const move = (i: number, d: number) =>
+    update((m) => {
+      const [r] = m.rounds.splice(i, 1)
+      m.rounds.splice(i + d, 0, r)
+    })
+  return (
+    <details>
+      <summary>Manches ({rounds.length})</summary>
+      <p>
+        <small>Sans manche, toutes les pistes sont jouées dans l'ordre.</small>
+      </p>
+      {rounds.map((r, i) => (
+        <fieldset key={i}>
+          <legend>
+            Manche {i + 1} <button disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+            <button disabled={i === rounds.length - 1} onClick={() => move(i, 1)}>↓</button>
+            <button onClick={() => update((m) => m.rounds.splice(i, 1))}>Supprimer</button>
+          </legend>
+          <Text o={r} path={['name']} label="Nom" />
+          <label>
+            Pistes{' '}
+            <select value={r.selection} onChange={(e) => update(() => (r.selection = value(e)))}>
+              <option value="sequence">liste fixe</option>
+              <option value="random">tirées au hasard dans des thèmes</option>
+              <option value="theme-pick">thème choisi par les joueurs</option>
+            </select>
+          </label>
+          {r.selection === 'sequence' ? (
+            <Ids o={r} path={['tracks']} label="Pistes, dans l'ordre des clics" options={trackOptions()} />
+          ) : (
+            <>
+              <Ids o={r} path={['themes']} label="Thèmes" options={themeOptions()} />
+              <Num o={r} path={['count']} label="Nombre de pistes" int />
+            </>
+          )}
+          {r.selection === 'theme-pick' && <Pick o={r} path={['picker']} label="Qui choisit" options={[['rotation', 'chacun son tour']]} />}
+          <Num o={r} path={['eliminate']} label="Éliminés en fin de manche" int />
+          <details>
+            <summary>Règles de la manche (vide : celles du pack)</summary>
+            <Rules o={r} />
+          </details>
+        </fieldset>
+      ))}
+      <button onClick={() => update((m) => (m.rounds = [...rounds, { name: `Manche ${rounds.length + 1}`, selection: 'sequence' }]))}>
+        + manche
+      </button>
+    </details>
+  )
 }
 
 function newTrackId(tracks: Data[]) {
@@ -183,6 +475,7 @@ function Tracks() {
             <th>Média</th>
             <th>Début (s)</th>
             <th>Durée (s)</th>
+            <th>Thèmes</th>
             <th>À deviner</th>
             <th />
           </tr>
@@ -191,7 +484,15 @@ function Tracks() {
           {tracks.map((t, i) => (
             <tr key={i}>
               <td>
-                <input value={t.id} onChange={(e) => update(() => (t.id = value(e)))} />
+                <input
+                  value={t.id}
+                  onChange={(e) =>
+                    update(() => {
+                      renameRef('tracks', t.id, value(e))
+                      t.id = value(e)
+                    })
+                  }
+                />
               </td>
               <td>
                 <select value={t.media} onChange={(e) => update(() => (t.media = value(e)))}>
@@ -210,11 +511,23 @@ function Tracks() {
                 <input type="number" min={1} step="0.1" value={t.duration ?? ''} placeholder={String(duration)} onChange={(e) => update(() => (t.duration = optionalNumber(value(e))))} />
               </td>
               <td>
+                <Ids o={t} path={['themes']} label="" options={themeOptions()} />
+              </td>
+              <td>
                 <Guesses track={t} />
               </td>
               <td>
                 <button onClick={() => (preview.value = t)}>Écouter</button>
-                <button onClick={() => update((m) => m.tracks.splice(i, 1))}>Supprimer</button>
+                <button
+                  onClick={() =>
+                    update((m) => {
+                      m.tracks.splice(i, 1)
+                      renameRef('tracks', t.id)
+                    })
+                  }
+                >
+                  Supprimer
+                </button>
               </td>
             </tr>
           ))}
@@ -285,10 +598,8 @@ export default function Edit() {
       {status.value && <p>{status.value}</p>}
       {m && (
         <>
-          <section>
-            <label>
-              Titre <input value={m.title} onInput={(e) => update(() => (m.title = value(e)))} />
-            </label>{' '}
+          <section class="savebar">
+            <strong>{m.title || current.value}</strong>{' '}
             <button class="primary" disabled={!dirty.value} onClick={save}>
               Enregistrer
             </button>
@@ -303,9 +614,17 @@ export default function Edit() {
               </ul>
             </section>
           )}
+          <General />
+          <Game />
+          <details>
+            <summary>Règles</summary>
+            <Rules o={m} />
+          </details>
+          <Themes />
           <Dropzone />
           <Tracks />
           <Preview />
+          <Rounds />
         </>
       )}
     </main>
