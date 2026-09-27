@@ -170,3 +170,11 @@ func TestRead(t *testing.T) {
 		}
 	}
 }
+
+func TestIsMedia(t *testing.T) {
+	for name, want := range map[string]bool{"clip.MP4": true, "cover.webp": true, "song.mp3": true, "notes.txt": false} {
+		if IsMedia(name) != want {
+			t.Errorf("IsMedia(%q) = %v, want %v", name, !want, want)
+		}
+	}
+}

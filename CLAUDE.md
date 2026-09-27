@@ -14,7 +14,7 @@ Blind test open-source, portable, hors ligne. Un binaire Go unique sert la page 
 
 ```
 cmd/linos/          point d'entrée, câblage uniquement
-internal/server/    HTTP : pages, /ws, /media, /api/join, /qr.png (ces trois derniers réservés au PC hôte)
+internal/server/    HTTP : pages, /ws, /media, /api/*, /qr.png, /edit (/media, /api/* sauf /api/log, /qr.png et /edit réservés au PC hôte)
 internal/game/      logique de jeu (salon, lobby, buzz, pistes, scores, états), testable sans réseau
 internal/ws/        transport WebSocket : rôles, lecture/écriture vers game.Room
 internal/network/   adresses IP locales pour le QR code ; pare-feu à venir
@@ -26,6 +26,7 @@ web/src/ws.ts       connexion WebSocket commune (reconnexion, jetons)
 web/src/control.tsx pilotage de la partie (PC hôte ou téléphone maître du jeu)
 web/src/host.tsx    affichage du jeu (TV) : médias, dévoilements, indices
 web/src/play.tsx    manette mobile
+web/src/edit.tsx    éditeur de packs (PC hôte)
 docs/               specs
 ```
 
@@ -58,5 +59,6 @@ Variables d'environnement :
 - `LINOS_LOG_LEVEL` : `debug` pour tracer chaque requête et message WebSocket (défaut : info).
 - `LINOS_WEB_DIR` : servir le front depuis le disque (`web/dist`), avec `npm run dev` dans `web/` qui rebuild à chaque modification.
 - `LINOS_ADDR` : adresse d'écoute (défaut `:7777`).
+- `LINOS_EDIT` : `off` désactive l'éditeur `/edit` (serveur auto-hébergé).
 
 Le hook `pre-commit` vérifie `gofmt` + `go vet` sur les `.go` stagés, et lance `npm run lint` / `typecheck` dans `web/` si ces scripts existent.

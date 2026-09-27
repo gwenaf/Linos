@@ -50,7 +50,7 @@ func check(t *testing.T, h http.Handler, cases []request) {
 const local, phone = "127.0.0.1:5000", "192.168.1.20:5000"
 
 func TestPages(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web)
+	h := New(game.NewRoom(t.TempDir()), web, false)
 	check(t, h, []request{
 		{"health", "/health", phone, http.StatusOK, "ok"},
 		{"control page", "/control", local, http.StatusOK, "id=app"},
@@ -78,7 +78,7 @@ func TestMedia(t *testing.T) {
 			break
 		}
 	}
-	check(t, New(room, web), []request{
+	check(t, New(room, web, false), []request{
 		{"host machine", "/media/a.mp3", local, http.StatusOK, "audio"},
 		{"phone", "/media/a.mp3", phone, http.StatusForbidden, ""},
 		{"not in manifest", "/media/manifest.json", local, http.StatusNotFound, ""},
@@ -86,7 +86,7 @@ func TestMedia(t *testing.T) {
 }
 
 func TestJoinAndQR(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web)
+	h := New(game.NewRoom(t.TempDir()), web, false)
 	check(t, h, []request{
 		{"join from phone", "/api/join", phone, http.StatusForbidden, ""},
 		{"qr", "/qr.png?data=http://192.168.1.10:7777/play", local, http.StatusOK, "PNG"},
@@ -112,7 +112,7 @@ func TestJoinAndQR(t *testing.T) {
 }
 
 func TestFrontErrorReport(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web)
+	h := New(game.NewRoom(t.TempDir()), web, false)
 	post := func(body string) int {
 		req := httptest.NewRequest("POST", "/api/log", strings.NewReader(body))
 		req.RemoteAddr = phone
@@ -132,7 +132,7 @@ func TestFrontErrorReport(t *testing.T) {
 }
 
 func TestWebSocketThroughRequestLog(t *testing.T) {
-	srv := httptest.NewServer(New(game.NewRoom(t.TempDir()), web))
+	srv := httptest.NewServer(New(game.NewRoom(t.TempDir()), web, false))
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -155,7 +155,7 @@ func TestNetworkHelpers(t *testing.T) {
 	t.Cleanup(func() { network.Command = prev })
 	var fail error
 	network.Command = func(string, ...string) ([]byte, error) { return []byte("Public"), fail }
-	h := New(game.NewRoom(t.TempDir()), web)
+	h := New(game.NewRoom(t.TempDir()), web, false)
 
 	check(t, h, []request{{"network info", "/api/network", local, http.StatusOK, `"hotspot":"192.168.137."`}})
 
@@ -186,7 +186,7 @@ func TestNetworkHelpers(t *testing.T) {
 
 func TestImport(t *testing.T) {
 	room := game.NewRoom(t.TempDir())
-	h := New(room, web)
+	h := New(room, web, false)
 	post := func(remote, origin, contentType string, body *bytes.Buffer) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/import?start=10&duration=20&via=device", body)
 		req.RemoteAddr, req.Host = remote, "localhost:7777"

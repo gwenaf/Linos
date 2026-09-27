@@ -57,7 +57,8 @@ func main() {
 	}
 	packs := filepath.Join(home, "packs")
 	slog.Info("starting", "home", home, "packs", packs, "webDir", os.Getenv("LINOS_WEB_DIR"), "joinAddresses", network.LocalIPs())
-	if err := run(ctx, ln, server.New(game.NewRoom(packs), front)); err != nil {
+	// LINOS_EDIT=off removes the pack editor, e.g. on a self-hosted server.
+	if err := run(ctx, ln, server.New(game.NewRoom(packs), front, os.Getenv("LINOS_EDIT") != "off")); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}

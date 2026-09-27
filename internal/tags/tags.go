@@ -19,11 +19,19 @@ import (
 	"github.com/gwenaf/linos/internal/pack"
 )
 
-// audio lists the extensions browsers play natively; an import keeps only these files.
-var audio = []string{".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+// audio and media list the extensions browsers play or show natively; an upload keeps only these files.
+var (
+	audio = []string{".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+	media = append([]string{".mp4", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif"}, audio...)
+)
 
 func isAudio(name string) bool {
 	return slices.Contains(audio, strings.ToLower(filepath.Ext(name)))
+}
+
+// IsMedia reports a file a pack can use: audio, video or image.
+func IsMedia(name string) bool {
+	return slices.Contains(media, strings.ToLower(filepath.Ext(name)))
 }
 
 // Options shape the generated tracks.
@@ -47,8 +55,8 @@ func Import(packsDir string, files *multipart.Reader, opts Options) (Result, err
 	if err != nil {
 		return Result{}, err
 	}
-	res := Result{Pack: name, Skipped: []string{}}
-	err = save(dir, files, &res)
+	res := Result{Pack: name}
+	_, res.Skipped, err = Save(dir, files, isAudio)
 	if err == nil {
 		res.Tracks, err = writeManifest(dir, "Import du "+now.Format("02/01/2006 15:04"), opts)
 	}
@@ -75,30 +83,35 @@ func newPackDir(packsDir, base string) (dir, name string, err error) {
 	}
 }
 
-func save(dir string, files *multipart.Reader, res *Result) error {
+// Save writes the uploaded files accept keeps into dir, renaming on conflict, and returns
+// the saved names and the skipped uploads.
+func Save(dir string, files *multipart.Reader, accept func(string) bool) (saved, skipped []string, err error) {
+	saved, skipped = []string{}, []string{}
 	for {
 		part, err := files.NextPart()
 		if err == io.EOF {
-			return nil
+			return saved, skipped, nil
 		}
 		if err != nil {
-			return err
+			return saved, skipped, err
 		}
 		name := safeName(part.FileName())
-		if !isAudio(name) {
+		if !accept(name) {
 			if part.FileName() != "" {
-				res.Skipped = append(res.Skipped, part.FileName())
+				skipped = append(skipped, part.FileName())
 			}
 			continue
 		}
-		f, err := os.Create(uniquePath(dir, name))
+		p := uniquePath(dir, name)
+		f, err := os.Create(p)
 		if err == nil {
 			_, err = io.Copy(f, part)
 			err = errors.Join(err, f.Close())
 		}
 		if err != nil {
-			return err
+			return saved, skipped, err
 		}
+		saved = append(saved, filepath.Base(p))
 	}
 }
 
@@ -153,6 +166,16 @@ func read(p string) info {
 	return i
 }
 
+// Guesses proposes the artist and title to guess from a file's tags or name.
+func Guesses(path string) []pack.Guess {
+	i := read(path)
+	var guesses []pack.Guess
+	if i.artist != "" {
+		guesses = append(guesses, pack.Guess{Label: "Artiste", Type: "text", Answers: answers(i.artist)})
+	}
+	return append(guesses, pack.Guess{Label: "Titre", Type: "text", Answers: answers(i.title)})
+}
+
 func fromName(name string) info {
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	// Drop a leading track number: "01 - Title", "07. Title".
@@ -190,17 +213,11 @@ func writeManifest(dir, title string, opts Options) (int, error) {
 		m.Rules.Duration = &opts.Duration
 	}
 	for _, e := range entries {
-		i := read(filepath.Join(dir, e.Name()))
-		var guesses []pack.Guess
-		if i.artist != "" {
-			guesses = append(guesses, pack.Guess{Label: "Artiste", Type: "text", Answers: answers(i.artist)})
-		}
-		guesses = append(guesses, pack.Guess{Label: "Titre", Type: "text", Answers: answers(i.title)})
 		m.Tracks = append(m.Tracks, pack.Track{
 			ID:      fmt.Sprintf("t%d", len(m.Tracks)+1),
 			Media:   e.Name(),
 			Start:   opts.Start,
-			Guesses: guesses,
+			Guesses: Guesses(filepath.Join(dir, e.Name())),
 		})
 	}
 	if len(m.Tracks) == 0 {

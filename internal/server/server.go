@@ -18,8 +18,9 @@ import (
 	"github.com/gwenaf/linos/internal/ws"
 )
 
-// New serves the game: the three pages from web (the built front), the websocket and the host-only helpers.
-func New(room *game.Room, web fs.FS) http.Handler {
+// New serves the game: the pages from web (the built front), the websocket and the host-only helpers.
+// edit enables the pack editor.
+func New(room *game.Room, web fs.FS, edit bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
@@ -30,6 +31,9 @@ func New(room *game.Room, web fs.FS) http.Handler {
 	mux.HandleFunc("GET /control", page)
 	mux.HandleFunc("GET /host", page)
 	mux.HandleFunc("GET /play", page)
+	if edit {
+		editor(mux, room.PacksDir(), page)
+	}
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		target := "/play"

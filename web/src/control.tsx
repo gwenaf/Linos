@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, isLocalPage, store, type Data } from './ws'
-import { Answers, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Qr, Results, Scores, droppedFiles, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -62,25 +62,6 @@ if (isLocalPage) {
 }
 
 const AUDIO = /\.(mp3|m4a|aac|ogg|opus|flac|wav)$/i
-
-// Dropped folders arrive as entries: walk them to collect every file inside.
-async function droppedFiles(entries: FileSystemEntry[]): Promise<File[]> {
-  const files: File[] = []
-  const walk = async (entry: FileSystemEntry): Promise<void> => {
-    if (entry.isFile) {
-      files.push(await new Promise<File>((ok, ko) => (entry as FileSystemFileEntry).file(ok, ko)))
-      return
-    }
-    const reader = (entry as FileSystemDirectoryEntry).createReader()
-    for (;;) {
-      const batch = await new Promise<FileSystemEntry[]>((ok, ko) => reader.readEntries(ok, ko))
-      if (batch.length === 0) return
-      for (const child of batch) await walk(child)
-    }
-  }
-  for (const entry of entries) await walk(entry)
-  return files
-}
 
 async function importMusic(files: File[]) {
   const audio = files.filter((f) => AUDIO.test(f.name))
@@ -248,6 +229,7 @@ export default function Control() {
     <main class="control">
       <header>
         <h1>Linos</h1>
+        {isLocalPage && <a href="/edit">Éditeur de packs</a>}
         <span class={conn.connected.value ? 'status ok' : 'status'}>{conn.connected.value ? 'Connecté' : 'Reconnexion…'}</span>
         {isLocalPage && <button onClick={() => window.open('/host', 'linos-host')}>Ouvrir l'écran de jeu</button>}
         {isLocalPage && <button onClick={() => conn.send('master-invite')}>Téléphone maître du jeu</button>}

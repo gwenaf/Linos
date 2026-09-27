@@ -14,6 +14,7 @@ const pages: Record<string, () => Promise<{ default: () => preact.JSX.Element }>
   '/control': () => import('./control'),
   '/host': () => import('./host'),
   '/play': () => import('./play'),
+  '/edit': () => import('./edit'),
 }
 
 const load = pages[location.pathname] ?? pages['/play']

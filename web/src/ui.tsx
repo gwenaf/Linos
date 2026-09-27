@@ -70,3 +70,22 @@ export function Answers({ guesses }: { guesses: Data[] }) {
     </ul>
   )
 }
+
+// Dropped folders arrive as entries: walk them to collect every file inside.
+export async function droppedFiles(entries: FileSystemEntry[]): Promise<File[]> {
+  const files: File[] = []
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      files.push(await new Promise<File>((ok, ko) => (entry as FileSystemFileEntry).file(ok, ko)))
+      return
+    }
+    const reader = (entry as FileSystemDirectoryEntry).createReader()
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((ok, ko) => reader.readEntries(ok, ko))
+      if (batch.length === 0) return
+      for (const child of batch) await walk(child)
+    }
+  }
+  for (const entry of entries) await walk(entry)
+  return files
+}

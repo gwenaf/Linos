@@ -65,12 +65,21 @@ func (p *Pack) load() error {
 	if err != nil {
 		return err
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p.Manifest); err != nil {
-		return fmt.Errorf("manifest.json: %w", err)
+	if p.Manifest, err = Decode(data); err != nil {
+		return err
 	}
 	return p.validate()
+}
+
+// Decode parses a manifest, refusing unknown fields: a typo must not be silently ignored.
+func Decode(data []byte) (Manifest, error) {
+	var m Manifest
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&m); err != nil {
+		return m, fmt.Errorf("manifest.json: %w", err)
+	}
+	return m, nil
 }
 
 // Media returns a seekable reader over a pack file, suitable for http.ServeContent.
