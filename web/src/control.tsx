@@ -4,6 +4,8 @@ import { Answers, Banner, Qr, Results, Scores, droppedFiles, scoreKey, scoreTabl
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
+// /control?pack=<name>: the editor's "Jouer ce pack" loads that pack once, with its default control.
+let packToPlay = new URLSearchParams(location.search).get('pack')
 
 // On the host machine the page is control by origin; a gamemaster phone joins with an invite, then its token.
 const conn =
@@ -98,8 +100,10 @@ conn.on('welcome', (d) => {
     return
   }
   if (d.token) store(MASTER_TOKEN, d.token)
-  if (invite) history.replaceState(null, '', '/control')
+  if (invite || packToPlay) history.replaceState(null, '', '/control')
   conn.send('list-packs')
+  if (packToPlay) conn.send('configure', { pack: packToPlay })
+  packToPlay = null
 })
 // Sent after every join: a reloaded or reconnected page resumes the game as it is.
 conn.on('state', (d) => {

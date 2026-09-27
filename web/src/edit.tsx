@@ -1021,6 +1021,13 @@ function ExportStep() {
         Exporter en .linospack
       </button>
       {exported.value && <button onClick={() => reveal(true)}>Afficher le .linospack</button>}
+      <h3>Tester</h3>
+      <p>
+        <small>Charge ce pack dans le pilotage, en l'état enregistré ; il faut au moins un joueur connecté pour lancer la partie.</small>
+      </p>
+      <button disabled={dirty.value || problems.value.length > 0} onClick={() => window.open(`/control?pack=${encodeURIComponent(current.value)}`, 'linos-control')}>
+        Jouer ce pack
+      </button>
     </>
   )
 }
