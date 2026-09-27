@@ -137,7 +137,7 @@ macOS affiche une demande similaire, répétée à chaque version pour une appli
 
 ### Docker
 
-Image destinée aux utilisateurs avancés qui installent Linos sur leur serveur. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur. `/control` et `/host` n'étant accordés qu'en bouclage, le pilotage à distance passe par l'invitation maître du jeu ; `/host` reste local au serveur.
+Image `ghcr.io/gwenaf/linos:<version>` (publiée à chaque release, `Dockerfile` à la racine) destinée aux utilisateurs avancés qui installent Linos sur leur serveur : `docker run -d --network host -v linos:/data ghcr.io/gwenaf/linos:<version>`, packs dans `packs/` du volume, éditeur désactivé. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur. `/control` et `/host` n'étant accordés qu'en bouclage, le pilotage à distance passe par l'invitation maître du jeu ; `/host` reste local au serveur.
 
 ## 6. Journalisation
 

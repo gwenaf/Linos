@@ -1,5 +1,6 @@
-# Publishes linos.exe on each version tag (git tag v0.1.0 && git push origin v0.1.0).
-# Tag-only trigger and one Linux runner (cross-compiles, cheapest runner) keep Actions usage minimal.
+# Publishes a release on each version tag (git tag v0.1.0 && git push origin v0.1.0); a tag with a
+# suffix (v0.1.0-alpha) is marked as a prerelease. Tag-only trigger and one Linux runner, which
+# cross-compiles every platform, keep Actions usage minimal.
 name: release
 
 on:
@@ -8,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -25,7 +27,57 @@ jobs:
       - run: npm ci && npm run build
         working-directory: web
       - run: go vet ./... && go test ./...
-      - run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o linos.exe ./cmd/linos
-      - run: gh release create "$GITHUB_REF_NAME" linos.exe --generate-notes
+      # Browser smoke test, with the runner's Chrome.
+      - run: node e2e/smoke.mjs
+        working-directory: web
+
+      - name: Build every platform
+        run: |
+          mkdir out
+          for target in windows/amd64 linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os=${target%/*} arch=${target#*/}
+            name=linos-$os-$arch
+            [ "$os" = windows ] && name=linos.exe
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "out/$name" ./cmd/linos
+          done
+
+      # Windows signing with SignPath (free for open source), skipped until it is set up:
+      # repository variables SIGNPATH_ORGANIZATION_ID, SIGNPATH_PROJECT_SLUG, SIGNPATH_POLICY_SLUG
+      # and secret SIGNPATH_API_TOKEN. The signed linos.exe replaces the unsigned one.
+      - id: unsigned
+        if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: linos-unsigned
+          path: out/linos.exe
+      - if: vars.SIGNPATH_ORGANIZATION_ID != ''
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: out
+
+      - name: Publish the release
+        run: |
+          prerelease=
+          [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=--prerelease
+          gh release create "$GITHUB_REF_NAME" out/* --generate-notes $prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+
+      # Docker image for self-hosting (linux/amd64), see the Dockerfile.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/linos:${{ github.ref_name }}
