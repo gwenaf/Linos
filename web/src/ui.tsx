@@ -180,3 +180,18 @@ export function outroVolume(outro: number, after: number): number {
   const left = outro - after
   return left <= 0 ? 0 : Math.min(1, left / Math.min(2, outro))
 }
+
+const BANNER = String.raw` _     ___ _   _  ___  ____
+| |   |_ _| \ | |/ _ \/ ___|
+| |    | ||  \| | | | \___ \
+| |___ | || |\  | |_| |___) |
+|_____|___|_| \_|\___/|____/`
+
+// Banner is the Linos title, drawn in ASCII: the app's only decoration.
+export function Banner() {
+  return (
+    <pre class="ascii" aria-label="Linos">
+      {BANNER}
+    </pre>
+  )
+}

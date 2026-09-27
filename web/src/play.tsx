@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, store, type Data } from './ws'
-import { Answers, Results, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Results, scoreKey, scoreTable, unitName } from './ui'
 
 const TOKEN = 'linos-player'
 // A reconnection invite (QR code shown by control) replaces a lost token, once.
@@ -207,7 +207,7 @@ function Identify() {
   }
   return (
     <form onSubmit={submit}>
-      <h1>Linos</h1>
+      <Banner />
       <label>
         Votre pseudo
         <input name="name" maxLength={32} required autoFocus />

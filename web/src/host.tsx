@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, scoreKey, scoreTable, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -141,7 +141,7 @@ export default function Host() {
     // Browsers only allow sound after a user gesture on the page.
     return (
       <main class="host activate" onClick={() => (activated.value = true)}>
-        <h1>Linos</h1>
+        <Banner />
         <p>Cliquez pour activer l'écran de jeu et le son</p>
       </main>
     )

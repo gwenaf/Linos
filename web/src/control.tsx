@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, isLocalPage, store, type Data } from './ws'
-import { Answers, Qr, Results, Scores, droppedFiles, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Qr, Results, Scores, droppedFiles, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -227,8 +227,8 @@ export default function Control() {
   const inLobby = state.value === 'lobby' || state.value === 'ready'
   return (
     <main class="control">
+      <Banner />
       <header>
-        <h1>Linos</h1>
         {isLocalPage && <a href="/edit">Éditeur de packs</a>}
         <span class={conn.connected.value ? 'status ok' : 'status'}>{conn.connected.value ? 'Connecté' : 'Reconnexion…'}</span>
         {isLocalPage && <button onClick={() => window.open('/host', 'linos-host')}>Ouvrir l'écran de jeu</button>}
