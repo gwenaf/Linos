@@ -174,6 +174,12 @@ export function Stage(props: {
   )
 }
 
+// whenLoaded runs fn once the media knows its duration; a cached media may know it before the page asks.
+export function whenLoaded(v: HTMLMediaElement, fn: () => void) {
+  if (v.readyState >= HTMLMediaElement.HAVE_METADATA) fn()
+  else v.onloadedmetadata = fn
+}
+
 // outroVolume is the media volume `after` seconds past the track end: full, then fading out
 // over the last 2 seconds of the outro; 0 means the media stops.
 export function outroVolume(outro: number, after: number): number {

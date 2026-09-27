@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Banner, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, whenLoaded, scoreKey, scoreTable, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -217,12 +217,12 @@ function TrackView() {
   useEffect(() => {
     const v = video.current
     if (!v) return
-    v.onloadedmetadata = () => {
+    whenLoaded(v, () => {
       // Joining mid-track: resume the media where the server clock is.
       v.currentTime = t.start + (startedBefore === t.index ? clockNow() * t.playbackRate : 0)
       v.playbackRate = t.playbackRate
       v.play().catch(() => {})
-    }
+    })
   }, [t.index])
 
   // The media plays unless the game is paused or someone holds the hand, or its outro is over.
