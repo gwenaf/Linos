@@ -95,9 +95,11 @@ type Track struct {
 	Start        float64  `json:"start,omitempty"`
 	Duration     float64  `json:"duration,omitempty"`
 	PlaybackRate float64  `json:"playbackRate,omitempty"`
-	Reveal       []Reveal `json:"reveal,omitempty"`
-	Guesses      []Guess  `json:"guesses,omitempty"`
-	Hints        []Hint   `json:"hints,omitempty"`
+	// Outro is the time the media keeps playing after the track ends, fading out; 0 stops it.
+	Outro   float64  `json:"outro,omitempty"`
+	Reveal  []Reveal `json:"reveal,omitempty"`
+	Guesses []Guess  `json:"guesses,omitempty"`
+	Hints   []Hint   `json:"hints,omitempty"`
 }
 
 // Reveal is a step of the effects /host applies live: numeric effects move linearly

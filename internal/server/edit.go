@@ -111,6 +111,21 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 		writeJSON(w, map[string]any{"uploads": uploads, "skipped": skipped})
 	})))
 
+	// ponytail: synchronous, the request lasts as long as ffmpeg; stream progress if big packs make it too long.
+	mux.HandleFunc("POST /api/edit/{pack}/export", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
+		name := r.PathValue("pack") + ".linospack"
+		dest := filepath.Join(packsDir, name)
+		cut, err := pack.Export(dir, dest)
+		if err != nil {
+			slog.Warn("export failed", "pack", name, "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		info, _ := os.Stat(dest) // just written
+		slog.Info("pack exported", "file", name, "cut", cut, "bytes", info.Size())
+		writeJSON(w, map[string]any{"file": name, "cut": cut, "size": info.Size()})
+	})))
+
 	mux.HandleFunc("GET /api/edit/{pack}/media/{name...}", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
 		http.ServeFileFS(w, r, os.DirFS(dir), r.PathValue("name"))
 	})))

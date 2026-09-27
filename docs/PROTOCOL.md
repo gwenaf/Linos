@@ -79,7 +79,7 @@ Une « équipe » désigne ci-dessous une équipe (`team`) ou un joueur sans éq
 ### Piste
 
 - `track-start` (S → C) : nouvelle piste, en état « chargement » : le buzz reste fermé. Tous reçoivent `index`, `total`, `round` (-1 sans manches), `duration`, `mode` (`buzz` ou `simultaneous`), `via` (`oral` ou `device`), `attempts`, `rebound`, `pauseOnBuzz` et `guesses`.
-  - L'écran hôte reçoit en plus `media` (URL `/media/…`), `start`, `playbackRate` (1 par défaut), `reveal` et `hints` ; il gère lui-même dévoilements et indices sur son lecteur.
+  - L'écran hôte reçoit en plus `media` (URL `/media/…`), `start`, `playbackRate` (1 par défaut), `outro` (secondes jouées après la fin, en fondu ; 0 arrête le média), `reveal` et `hints` ; il gère lui-même dévoilements et indices sur son lecteur.
   - Les joueurs ne reçoivent que `label`, `type` et, pour un `choice`, `choices` et `choicesAt`. `control` reçoit les éléments complets, réponses comprises.
 - `media-started` (C → S, `host`) : la lecture a réellement commencé. Le chrono de la piste démarre et le buzz s'ouvre. Hors chargement : `error` `wrong-state`.
 - `timer-start` (S → C) : chrono lancé. Contient `index` et `duration`. Le chrono s'arrête pendant les pauses et pendant qu'un joueur a la main ; la piste se termine quand `duration` a été jouée.

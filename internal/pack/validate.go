@@ -79,8 +79,8 @@ func (p *Pack) validate() error {
 		tracks[t.ID] = true
 		v.refs(at+".themes", t.Themes, themes)
 		v.file(at+".media", t.Media)
-		if t.Start < 0 || t.Duration < 0 || t.PlaybackRate < 0 {
-			v.fail("%s: start, duration and playbackRate cannot be negative", at)
+		if t.Start < 0 || t.Duration < 0 || t.PlaybackRate < 0 || t.Outro < 0 {
+			v.fail("%s: start, duration, playbackRate and outro cannot be negative", at)
 		}
 		for j, r := range t.Reveal {
 			v.reveal(fmt.Sprintf("%s.reveal[%d]", at, j), r)

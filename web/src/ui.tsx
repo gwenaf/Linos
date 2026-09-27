@@ -173,3 +173,10 @@ export function Stage(props: {
     </div>
   )
 }
+
+// outroVolume is the media volume `after` seconds past the track end: full, then fading out
+// over the last 2 seconds of the outro; 0 means the media stops.
+export function outroVolume(outro: number, after: number): number {
+  const left = outro - after
+  return left <= 0 ? 0 : Math.min(1, left / Math.min(2, outro))
+}

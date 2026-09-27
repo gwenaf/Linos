@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gwenaf/linos/internal/game"
+	"github.com/gwenaf/linos/internal/pack"
 )
 
 func TestEditorOff(t *testing.T) {
@@ -92,6 +94,17 @@ func TestEditor(t *testing.T) {
 	}
 	want(do("PUT", "/api/edit/quiz", "application/json", `{"titel":"typo"}`), http.StatusBadRequest, "unknown field")
 	want(do("PUT", "/api/edit/quiz", "application/json", `{} trailing`), http.StatusBadRequest, "invalid character")
+
+	// Export without ffmpeg: media copied whole, archive next to the folder.
+	old := pack.FFmpeg
+	t.Cleanup(func() { pack.FFmpeg = old })
+	pack.FFmpeg = func(...string) ([]byte, error) { return nil, errors.New("not found") }
+	want(do("POST", "/api/edit/quiz/export", "", ""), http.StatusOK, `"cut":false,"file":"quiz.linospack"`)
+	if _, err := os.Stat(filepath.Join(packs, "quiz.linospack")); err != nil {
+		t.Fatalf("archive not written: %v", err)
+	}
+	want(do("PUT", "/api/edit/quiz", "application/json", `{"version":1,"title":""}`), http.StatusOK, "title is required")
+	want(do("POST", "/api/edit/quiz/export", "", ""), http.StatusBadRequest, "title is required")
 
 	// A folder whose manifest.json cannot be read or written.
 	os.MkdirAll(filepath.Join(packs, "broken", "manifest.json"), 0o755)

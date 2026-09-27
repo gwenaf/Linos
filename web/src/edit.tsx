@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { IMAGE, Stage, droppedFiles, effectsAt, finalEffects } from './ui'
+import { IMAGE, Stage, droppedFiles, effectsAt, finalEffects, outroVolume } from './ui'
 import type { Data } from './ws'
 
 // Pack editor: folder packs of packs/, host machine only. The manifest is edited as loaded,
@@ -71,6 +71,21 @@ async function save() {
   problems.value = (await res.json()).problems
   dirty.value = false
   status.value = 'Enregistré.'
+}
+
+// exportPack writes packs/<name>.linospack, media cut by ffmpeg when it is installed.
+async function exportPack() {
+  status.value = 'Export en cours : le découpage des médias peut prendre quelques minutes…'
+  const res = await fetch(packUrl('/export'), { method: 'POST' })
+  if (!res.ok) {
+    status.value = `Échec de l'export : ${await res.text()}`
+    return
+  }
+  const d = await res.json()
+  const size = (d.size / 1e6).toFixed(1)
+  status.value = d.cut
+    ? `Exporté : packs/${d.file} (${size} Mo), médias découpés aux extraits joués.`
+    : `Exporté : packs/${d.file} (${size} Mo). ffmpeg introuvable : médias copiés entiers ; installez-le pour réduire la taille.`
 }
 
 // update edits the manifest in place, then publishes a new reference so the page renders again.
@@ -474,6 +489,7 @@ function Tracks() {
             <th>Média</th>
             <th>Début (s)</th>
             <th>Durée (s)</th>
+            <th>Suite après la fin (s)</th>
             <th>Thèmes</th>
             <th>À deviner</th>
             <th />
@@ -508,6 +524,9 @@ function Tracks() {
               </td>
               <td>
                 <input type="number" min={1} step="0.1" value={t.duration ?? ''} placeholder={String(duration)} onChange={(e) => update(() => (t.duration = optionalNumber(value(e))))} />
+              </td>
+              <td>
+                <input type="number" min={0} step="0.1" value={t.outro ?? ''} placeholder="0" onChange={(e) => update(() => (t.outro = optionalNumber(value(e))))} />
               </td>
               <td>
                 <Ids o={t} path={['themes']} label="" options={themeOptions()} />
@@ -546,6 +565,7 @@ function Preview() {
   const start = t.start ?? 0
   const rate = t.playbackRate ?? 1
   const duration = t.duration ?? manifest.value.rules?.duration ?? DEFAULT_DURATION
+  const outro = t.outro ?? 0
 
   useEffect(() => {
     const began = performance.now()
@@ -560,11 +580,12 @@ function Preview() {
     // Pictures have no media clock: the preview counts wall time.
     const id = setInterval(() => {
       const elapsed = v ? (v.currentTime - start) / rate : (performance.now() - began) / 1000
-      if (elapsed >= duration) v?.pause()
-      setNow(Math.min(elapsed, duration))
+      if (v) v.volume = elapsed < duration ? 1 : outroVolume(outro, elapsed - duration)
+      if (elapsed >= duration + outro) v?.pause()
+      setNow(Math.min(elapsed, duration + outro))
     }, 100)
     return () => clearInterval(id)
-  }, [t.media, start, rate, duration, run])
+  }, [t.media, start, rate, duration, outro, run])
 
   const steps: Data[] = t.reveal ?? []
   const hints: Data[] = t.hints ?? []
@@ -698,6 +719,9 @@ export default function Edit() {
             <strong>{m.title || current.value}</strong>{' '}
             <button class="primary" disabled={!dirty.value} onClick={save}>
               Enregistrer
+            </button>{' '}
+            <button disabled={dirty.value || problems.value.length > 0} onClick={exportPack}>
+              Exporter en .linospack
             </button>
           </section>
           {problems.value.length > 0 && (

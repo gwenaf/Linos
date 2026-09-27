@@ -285,6 +285,7 @@ func (r *Room) trackPayload(role string) map[string]any {
 	host["media"] = (&url.URL{Path: "/media/" + t.Media}).EscapedPath()
 	host["start"] = t.Start
 	host["playbackRate"] = rate
+	host["outro"] = t.Outro
 	host["reveal"] = t.Reveal
 	host["hints"] = t.Hints
 	control := maps.Clone(host)

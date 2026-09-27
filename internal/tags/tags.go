@@ -34,6 +34,9 @@ func IsMedia(name string) bool {
 	return slices.Contains(media, strings.ToLower(filepath.Ext(name)))
 }
 
+// importOutro keeps the music playing a little after the answer, as before tracks had an outro.
+const importOutro = 10
+
 // Options shape the generated tracks.
 type Options struct {
 	Start    float64 // where each extract starts, in seconds
@@ -217,6 +220,7 @@ func writeManifest(dir, title string, opts Options) (int, error) {
 			ID:      fmt.Sprintf("t%d", len(m.Tracks)+1),
 			Media:   e.Name(),
 			Start:   opts.Start,
+			Outro:   importOutro,
 			Guesses: Guesses(filepath.Join(dir, e.Name())),
 		})
 	}

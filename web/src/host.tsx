@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Qr, Results, Scores, Stage, effectsAt, finalEffects, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, scoreKey, scoreTable, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -225,17 +225,36 @@ function TrackView() {
     }
   }, [t.index])
 
-  // The media plays unless the game is paused or someone holds the hand; after the end it keeps playing, unveiled.
+  // The media plays unless the game is paused or someone holds the hand, or its outro is over.
+  const outroOver = useRef(false)
   useEffect(
     () =>
       effect(() => {
         const v = video.current
         if (!v) return
-        if (paused.value || holderStops()) v.pause()
+        if (paused.value || holderStops() || outroOver.current) v.pause()
         else v.play().catch(() => {})
       }),
     [t.index],
   )
+
+  // After the end, the media keeps playing, unveiled, for its outro, then fades out and stops.
+  useEffect(() => {
+    const v = video.current
+    if (!ended.value) outroOver.current = false
+    if (!ended.value || !v) return
+    const began = performance.now()
+    const fade = () => {
+      v.volume = outroVolume(t.outro ?? 0, (performance.now() - began) / 1000)
+      if (v.volume > 0) return
+      outroOver.current = true
+      v.pause()
+      clearInterval(id)
+    }
+    const id = setInterval(fade, 100)
+    fade()
+    return () => clearInterval(id)
+  }, [!!ended.value, t.index])
 
   return (
     <>
