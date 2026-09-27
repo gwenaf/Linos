@@ -1,11 +1,12 @@
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { Banner, IMAGE, Stage, droppedFiles, effectsAt, finalEffects, outroVolume } from './ui'
+import { Banner, IMAGE, Stage, droppedFiles, effectsAt, finalEffects, outroVolume, whenLoaded } from './ui'
 import type { Data } from './ws'
 
 // Pack editor: folder packs of packs/, host machine only. The manifest is edited as loaded,
 // so fields this page does not show yet are kept when saving.
 const packs = signal<string[]>([])
+const archives = signal<string[]>([])
 const current = signal('')
 const manifest = signal<Data>(null)
 const media = signal<string[]>([])
@@ -16,6 +17,8 @@ const preview = signal<Data>(null)
 const newName = signal('')
 const dragging = signal(false)
 const exported = signal(false)
+// playlist holds the tracks of a round being previewed, in play order.
+const playlist = signal<string[]>([])
 const step = signal('pack')
 
 const MEDIA = /\.(mp3|m4a|aac|ogg|opus|flac|wav|mp4|m4v|webm|jpe?g|png|webp|gif)$/i
@@ -31,7 +34,21 @@ addEventListener('beforeunload', (e) => {
 })
 
 async function listPacks() {
-  packs.value = await (await fetch('/api/edit')).json()
+  const d = await (await fetch('/api/edit')).json()
+  packs.value = d.folders
+  archives.value = d.archives
+}
+
+// unpack copies an exported archive into a new folder pack, then opens it.
+async function unpack(name: string) {
+  const res = await fetch('/api/edit/unpack', { method: 'POST', body: JSON.stringify({ name }) })
+  if (!res.ok) {
+    status.value = `Impossible d'ouvrir l'archive : ${await res.text()}`
+    return
+  }
+  const d = await res.json()
+  await listPacks()
+  await open(d.name)
 }
 listPacks()
 
@@ -52,6 +69,7 @@ async function open(name: string) {
   status.value = ''
   exported.value = false
   step.value = 'pack'
+  playlist.value = []
 }
 
 async function create() {
@@ -275,26 +293,75 @@ function Rules({ o }: { o: Data }) {
   )
 }
 
+const splitList = (v: string) => v.split(';').map((a) => a.trim()).filter(Boolean)
+
+// retype switches a guess between free text, multiple choice and number, keeping what still fits.
+function retype(g: Data, type: string) {
+  const known: string[] = g.type === 'choice' ? g.choices ?? [] : g.type === 'text' ? g.answers ?? [] : []
+  for (const k of ['answers', 'answer', 'choices', 'choicesAt', 'tolerance']) delete g[k]
+  g.type = type
+  if (type === 'text') g.answers = known
+  if (type === 'choice') {
+    g.choices = known
+    if (known.length > 0) g.answer = known[0]
+  }
+}
+
+// Guesses edits what players must find: free text, a multiple choice or a number.
 function Guesses({ track }: { track: Data }) {
-  const set = (fn: () => void) => update(fn)
   return (
     <>
       {(track.guesses ?? []).map((g: Data, j: number) => (
         <div key={j}>
-          <input value={g.label} placeholder="Élément" onInput={(e) => set(() => (g.label = value(e)))} />
-          {g.type === 'text' ? (
+          <input value={g.label} placeholder="Élément (ex. Artiste)" onInput={(e) => update(() => (g.label = value(e)))} />{' '}
+          <select value={g.type} onChange={(e) => update(() => retype(g, value(e)))}>
+            <option value="text">texte libre</option>
+            <option value="choice">QCM</option>
+            <option value="number">nombre</option>
+          </select>{' '}
+          <button onClick={() => update(() => track.guesses.splice(j, 1))}>×</button>
+          <br />
+          {g.type === 'text' && (
             <input
               value={(g.answers ?? []).join(' ; ')}
               placeholder="Réponses acceptées, séparées par ;"
-              onChange={(e) => set(() => (g.answers = value(e).split(';').map((a) => a.trim()).filter(Boolean)))}
+              onChange={(e) => update(() => (g.answers = splitList(value(e))))}
             />
-          ) : (
-            <small> {g.type}</small>
           )}
-          <button onClick={() => set(() => track.guesses.splice(j, 1))}>×</button>
+          {g.type === 'choice' && (
+            <>
+              <input
+                value={(g.choices ?? []).join(' ; ')}
+                placeholder="Choix proposés, séparés par ;"
+                onChange={(e) =>
+                  update(() => {
+                    g.choices = splitList(value(e))
+                    if (!g.choices.includes(g.answer)) g.answer = g.choices[0]
+                  })
+                }
+              />
+              <label>
+                Bonne réponse{' '}
+                <select value={g.answer ?? ''} onChange={(e) => update(() => (g.answer = value(e)))}>
+                  {(g.choices ?? []).map((c: string) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Num o={g} path={['choicesAt']} label="Choix affichés à (s)" placeholder="0" />
+            </>
+          )}
+          {g.type === 'number' && (
+            <>
+              <Num o={g} path={['answer']} label="Réponse" />
+              <Num o={g} path={['tolerance']} label="Tolérance ±" placeholder="0" />
+            </>
+          )}
         </div>
       ))}
-      <button onClick={() => set(() => (track.guesses = [...(track.guesses ?? []), { label: '', type: 'text', answers: [] }]))}>
+      <button onClick={() => update(() => (track.guesses = [...(track.guesses ?? []), { label: '', type: 'text', answers: [] }]))}>
         + élément
       </button>
     </>
@@ -315,20 +382,25 @@ function Preview() {
 
   useEffect(() => {
     const began = performance.now()
+    let done = false
     const v = video.current
     if (v) {
-      v.onloadedmetadata = () => {
+      whenLoaded(v, () => {
         v.currentTime = start
         v.playbackRate = rate
         v.play().catch(() => {})
-      }
+      })
     }
     // Pictures have no media clock: the preview counts wall time.
     const id = setInterval(() => {
       const elapsed = v ? (v.currentTime - start) / rate : (performance.now() - began) / 1000
       if (v) v.volume = elapsed < duration ? 1 : outroVolume(outro, elapsed - duration)
-      if (elapsed >= duration + outro) v?.pause()
-      setNow(Math.min(elapsed, duration + outro))
+      if (elapsed >= duration + outro && !done) {
+        done = true
+        v?.pause()
+        playNext(t)
+      }
+      setNow(Math.max(0, Math.min(elapsed, duration + outro)))
     }, 100)
     return () => clearInterval(id)
   }, [t.media, start, rate, duration, outro, run])
@@ -572,6 +644,35 @@ function ThemesStep() {
   )
 }
 
+// playNext moves a round preview to the next track, or ends it after the last one.
+function playNext(t: Data) {
+  const i = playlist.value.indexOf(t.id)
+  if (i < 0) return
+  const next = playlist.value[i + 1]
+  if (next) preview.value = trackById(next)
+  else playlist.value = []
+}
+
+// previewRound plays a round as the game would: its list in order, or a random draw from its themes.
+function previewRound(r: Data, pool: string[]) {
+  const ids = r.selection === 'sequence' ? [...(r.tracks ?? [])] : [...pool].sort(() => Math.random() - 0.5).slice(0, r.count || pool.length)
+  if (ids.length === 0) return
+  playlist.value = ids
+  preview.value = trackById(ids[0])
+}
+
+function RoundPreview({ r, pool }: { r: Data; pool: string[] }) {
+  if (playlist.value.length === 0) {
+    return <button onClick={() => previewRound(r, pool)}>▶ Aperçu de la manche</button>
+  }
+  const i = playlist.value.indexOf(preview.value?.id) + 1
+  return (
+    <button onClick={() => (playlist.value = [])}>
+      ■ Arrêter l'aperçu ({i} / {playlist.value.length})
+    </button>
+  )
+}
+
 function newTrackId(tracks: Data[]) {
   const ids = new Set(tracks.map((t) => t.id))
   let n = tracks.length + 1
@@ -684,10 +785,39 @@ function TrackList({ ids, move, remove }: { ids: string[]; move?: (i: number, d:
   )
 }
 
+const tenth = (x: number) => Math.round(x * 10) / 10
+
+// Locate plays the whole file: its buttons set the extract's start, end and outro end at the position heard.
+function Locate({ t }: { t: Data }) {
+  const ref = useRef<HTMLAudioElement>(null)
+  if (IMAGE.test(t.media)) return null
+  const start = t.start ?? 0
+  const rate = t.playbackRate ?? 1
+  const duration = t.duration ?? manifest.value.rules?.duration ?? DEFAULT_DURATION
+  // Media time to track time: the extract plays from start, at its rate.
+  const played = () => ((ref.current?.currentTime ?? 0) - start) / rate
+  return (
+    <div class="locate">
+      <h4>Repérage dans le fichier entier</h4>
+      <audio ref={ref} controls preload="metadata" src={mediaUrl(t.media)} />
+      <div>
+        <button onClick={() => put(t, ['start'], tenth(ref.current?.currentTime ?? 0))}>Début ici</button>
+        <button onClick={() => played() > 0 && put(t, ['duration'], tenth(played()))}>Fin ici</button>
+        <button onClick={() => played() > duration && put(t, ['outro'], tenth(played() - duration))}>Fin de la suite ici</button>
+      </div>
+    </div>
+  )
+}
+
 function TrackEditor({ t }: { t: Data }) {
   const defaultDuration = manifest.value.rules?.duration ?? DEFAULT_DURATION
+  const ref = useRef<HTMLDivElement>(null)
+  // A round preview opens each track in turn: keep it in view.
+  useEffect(() => {
+    if (playlist.value.length > 0) ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [t.id])
   return (
-    <div class="track-editor">
+    <div class="track-editor" ref={ref}>
       <label>
         Id{' '}
         <input
@@ -716,6 +846,7 @@ function TrackEditor({ t }: { t: Data }) {
       <Num o={t} path={['duration']} label="Durée (s)" placeholder={String(defaultDuration)} />
       <Num o={t} path={['outro']} label="Suite après la fin (s)" placeholder="0" />
       <Num o={t} path={['playbackRate']} label="Vitesse" placeholder="1" />
+      <Locate t={t} />
       {(manifest.value.themes ?? []).length > 0 && <Ids o={t} path={['themes']} label="Thèmes" options={themeOptions()} />}
       <h4>À deviner</h4>
       <Guesses track={t} />
@@ -772,6 +903,7 @@ function RoundStep({ i }: { i: number }) {
           <option value="theme-pick">thème choisi par les joueurs</option>
         </select>
       </label>
+      <RoundPreview r={r} pool={pool} />
       {r.selection === 'sequence' ? (
         <>
           <TrackList
@@ -881,18 +1013,7 @@ function ExportStep() {
           Pistes dans aucune manche, donc jamais jouées : {unused.map((t: Data) => t.id).join(', ')}.
         </p>
       )}
-      {problems.value.length > 0 ? (
-        <div class="warning">
-          <p>À corriger avant l'export (enregistrez pour mettre à jour) :</p>
-          <ul>
-            {problems.value.map((p) => (
-              <li key={p}>{p}</li>
-            ))}
-          </ul>
-        </div>
-      ) : (
-        <p>Le pack est jouable.</p>
-      )}
+      {problems.value.length > 0 ? <Problems /> : <p>Le pack est jouable.</p>}
       <p>
         <small>ffmpeg, s'il est installé, découpe chaque média aux extraits joués pour alléger le fichier.</small>
       </p>
@@ -901,6 +1022,79 @@ function ExportStep() {
       </button>
       {exported.value && <button onClick={() => reveal(true)}>Afficher le .linospack</button>}
     </>
+  )
+}
+
+// Validator messages (see internal/pack/validate.go), in the page's language.
+const messages: [RegExp, string][] = [
+  [/title is required/, 'titre manquant'],
+  [/at least one track is required/, 'aucune piste'],
+  [/\.id is required/, 'identifiant manquant'],
+  [/\.id "(.*)" is duplicated/, 'identifiant « $1 » en double'],
+  [/image "(.*)" not found/, 'photo « $1 » introuvable'],
+  [/cover "(.*)" not found/, 'couverture « $1 » introuvable'],
+  [/"(.*)" not found/, 'média « $1 » introuvable'],
+  [/at least one guess is required/, 'rien à deviner'],
+  [/label is required/, 'élément à deviner sans nom'],
+  [/label "(.*)" is duplicated/, 'élément « $1 » en double'],
+  [/a text guess needs answers/, 'aucune réponse acceptée'],
+  [/answer must be one of choices/, 'bonne réponse du QCM absente des choix'],
+  [/answer must be a number/, 'réponse numérique manquante'],
+  [/a sequence round needs tracks/, 'aucune piste dans la manche'],
+  [/round needs themes/, 'aucun thème choisi'],
+  [/count must be positive/, 'nombre de pistes jouées manquant'],
+  [/unknown id "(.*)"/, 'référence inconnue « $1 »'],
+  [/cannot be negative/, 'valeur négative'],
+  [/grayscale must be between 0 and 1/, 'gris hors de 0 à 1'],
+  [/fuzziness must be between 0 and 1/, 'tolérance aux fautes hors de 0 à 1'],
+  [/attempts must be at least 1/, 'essais : au moins 1'],
+  [/control\.default/, 'contrôle par défaut absent des contrôles possibles'],
+  [/minTeams exceeds maxTeams/, 'équipes : min supérieur à max'],
+  [/end\.target must be positive/, 'score cible manquant'],
+  [/min exceeds max/, 'points : min supérieur à max'],
+]
+
+// problemPlace finds the step a validator problem belongs to, and what it concerns.
+function problemPlace(p: string): { step: string; where: string; text: string } {
+  const m = manifest.value
+  const found = messages.find(([re]) => re.test(p))
+  const text = found ? found[1].replace('$1', p.match(found[0])?.[1] ?? '') : p
+  const round = /^rounds\[(\d+)\]/.exec(p)
+  if (round) return { step: `round:${round[1]}`, where: `Manche ${Number(round[1]) + 1}`, text }
+  const track = /^tracks\[(\d+)\]/.exec(p)
+  if (track) {
+    const t = m.tracks?.[Number(track[1])]
+    const i = (m.rounds ?? []).findIndex((r: Data) => r.tracks?.includes(t?.id) || t?.themes?.some((th: string) => r.themes?.includes(th)))
+    const step = i >= 0 ? `round:${i}` : (m.rounds ?? []).length > 0 ? 'export' : 'tracks'
+    return { step, where: `Piste ${t?.id ?? Number(track[1]) + 1}`, text }
+  }
+  if (/^themes/.test(p)) return { step: 'themes', where: 'Thèmes', text }
+  if (/^(game|rules)/.test(p)) return { step: 'game', where: 'Partie', text }
+  return { step: 'pack', where: 'Pack', text }
+}
+
+// Problems lists what keeps the pack from being played; only those of one step when given.
+function Problems({ only }: { only?: string }) {
+  const list = problems.value.map(problemPlace).filter((x) => !only || x.step === only)
+  if (list.length === 0) return null
+  return (
+    <div class="warning">
+      <p>{only ? 'À corriger ici :' : 'À corriger avant l\'export (enregistrez pour mettre à jour) :'}</p>
+      <ul>
+        {list.map((x, i) => (
+          <li key={i}>
+            {only ? (
+              x.where
+            ) : (
+              <button class="link" onClick={() => (step.value = x.step)}>
+                {x.where}
+              </button>
+            )}{' '}
+            : {x.text}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -926,6 +1120,23 @@ function Landing() {
           </li>
         ))}
       </ul>
+      {archives.value.length > 0 && (
+        <>
+          <h2>Modifier une archive</h2>
+          <p>
+            <small>Une archive .linospack se modifie par une copie en dossier, à réexporter ensuite.</small>
+          </p>
+          <ul class="packs">
+            {archives.value.map((a) => (
+              <li key={a}>
+                <button class="link" onClick={() => unpack(a)}>
+                  ▸ {a}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <h2>Nouveau pack</h2>
       <form
         onSubmit={(e) => {
@@ -952,6 +1163,10 @@ function close() {
 export default function Edit() {
   const m = manifest.value
   const s = step.value
+  // Leaving a step ends its round preview.
+  useEffect(() => {
+    playlist.value = []
+  }, [s])
   return (
     <main class="edit">
       {!m ? (
@@ -965,6 +1180,11 @@ export default function Edit() {
             <strong>{m.title || current.value}</strong>
             <span class="spacer" />
             {status.value && <small class="inline">{status.value}</small>}
+            {problems.value.length > 0 && (
+              <button class="link" onClick={() => (step.value = 'export')}>
+                {problems.value.length} à corriger
+              </button>
+            )}
             <button onClick={() => reveal()}>Ouvrir le dossier</button>
             <button class="primary" disabled={!dirty.value} onClick={save}>
               {dirty.value ? 'Enregistrer' : 'Enregistré'}
@@ -972,6 +1192,7 @@ export default function Edit() {
           </header>
           <Stepper />
           <section class="step">
+            {s !== 'export' && <Problems only={s} />}
             {s === 'pack' && <PackStep />}
             {s === 'game' && <GameStep />}
             {s === 'themes' && <ThemesStep />}

@@ -77,7 +77,7 @@ Exemples :
 
 - Intégré à Linos : mêmes types Go (`internal/pack`) que le jeu, donc aucun contrat à synchroniser.
 - Réservé au PC hôte (`hostOnly`, comme `/control`) ; `LINOS_EDIT=off` le désactive (serveur auto-hébergé).
-- N'écrit que dans les packs dossier de `packs/`. Un `.linospack` est en lecture seule.
+- N'écrit que dans les packs dossier de `packs/`. Un `.linospack` se modifie par une copie décompressée en dossier, à réexporter.
 - Effets (flou, pixelisation, image fixe…) : données du manifest appliquées en direct par `/host`, jamais incrustées dans le média.
 - Export : ffmpeg facultatif, cherché dans le PATH, découpe chaque média aux segments joués (fondu de sortie compris) puis écrit le `.linospack`. Pas de ffmpeg dans le binaire. Sans ffmpeg, l'export copie les médias entiers.
 

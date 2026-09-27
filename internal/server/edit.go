@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -21,15 +22,40 @@ import (
 func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 	mux.HandleFunc("GET /edit", hostOnly(page))
 
+	// Folder packs are edited in place; archives are listed so they can be unpacked into a folder.
 	mux.HandleFunc("GET /api/edit", hostOnly(func(w http.ResponseWriter, r *http.Request) {
-		names := []string{}
+		folders, archives := []string{}, []string{}
 		entries, _ := os.ReadDir(packsDir) // a missing packs folder simply means no packs
 		for _, e := range entries {
 			if _, err := os.Stat(filepath.Join(packsDir, e.Name(), "manifest.json")); e.IsDir() && err == nil {
-				names = append(names, e.Name())
+				folders = append(folders, e.Name())
+			} else if !e.IsDir() && filepath.Ext(e.Name()) == ".linospack" {
+				archives = append(archives, e.Name())
 			}
 		}
-		writeJSON(w, names)
+		writeJSON(w, map[string][]string{"folders": folders, "archives": archives})
+	}))
+
+	mux.HandleFunc("POST /api/edit/unpack", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		var d struct{ Name string }
+		json.NewDecoder(r.Body).Decode(&d) // an unreadable body leaves an empty, refused name
+		base, isArchive := strings.CutSuffix(d.Name, ".linospack")
+		if !validPackName(d.Name) || !isArchive || base == "" {
+			http.Error(w, "invalid archive name", http.StatusBadRequest)
+			return
+		}
+		// The folder takes the archive's name, numbered if a folder already has it.
+		name := base
+		for i := 2; fileExists(filepath.Join(packsDir, name)); i++ {
+			name = fmt.Sprintf("%s-%d", base, i)
+		}
+		if err := pack.Unpack(filepath.Join(packsDir, d.Name), filepath.Join(packsDir, name)); err != nil {
+			slog.Warn("unpack failed", "archive", d.Name, "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		slog.Info("pack unpacked", "archive", d.Name, "folder", name)
+		writeJSON(w, map[string]string{"name": name})
 	}))
 
 	mux.HandleFunc("POST /api/edit", hostOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +205,11 @@ func withPack(packsDir string, h func(http.ResponseWriter, *http.Request, string
 		}
 		h(w, r, dir)
 	}
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // validPackName accepts a single folder name, nothing that could leave packsDir.

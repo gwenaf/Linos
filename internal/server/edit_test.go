@@ -45,7 +45,7 @@ func TestEditor(t *testing.T) {
 	check(t, h, []request{
 		{"page", "/edit", local, http.StatusOK, "id=app"},
 		{"page from a phone", "/edit", phone, http.StatusForbidden, ""},
-		{"no packs folder yet", "/api/edit", local, http.StatusOK, "[]"},
+		{"no packs folder yet", "/api/edit", local, http.StatusOK, `{"archives":[],"folders":[]}`},
 		{"unknown pack", "/api/edit/nope", local, http.StatusNotFound, "no folder pack"},
 		{"invalid pack name", "/api/edit/a:b", local, http.StatusNotFound, "no folder pack"},
 	})
@@ -56,7 +56,7 @@ func TestEditor(t *testing.T) {
 	// Only folders holding a manifest are listed: not archives nor stray folders.
 	os.WriteFile(filepath.Join(packs, "old.linospack"), []byte("zip"), 0o644)
 	os.Mkdir(filepath.Join(packs, "stray"), 0o755)
-	want(do("GET", "/api/edit", "", ""), http.StatusOK, `["quiz"]`)
+	want(do("GET", "/api/edit", "", ""), http.StatusOK, `{"archives":["old.linospack"],"folders":["quiz"]}`)
 
 	// A new pack is saved but not playable yet.
 	want(do("GET", "/api/edit/quiz", "", ""), http.StatusOK, "at least one track is required")
@@ -103,6 +103,13 @@ func TestEditor(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(packs, "quiz.linospack")); err != nil {
 		t.Fatalf("archive not written: %v", err)
 	}
+	// The archive unpacks into a new folder, numbered since "quiz" exists.
+	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"quiz.linospack"}`), http.StatusOK, `"name":"quiz-2"`)
+	want(do("GET", "/api/edit/quiz-2", "", ""), http.StatusOK, `"problems":[]`)
+	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"quiz"}`), http.StatusBadRequest, "invalid archive name")
+	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"../x.linospack"}`), http.StatusBadRequest, "invalid archive name")
+	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"old.linospack"}`), http.StatusBadRequest, "zip")
+
 	want(do("PUT", "/api/edit/quiz", "application/json", `{"version":1,"title":""}`), http.StatusOK, "title is required")
 	want(do("POST", "/api/edit/quiz/export", "", ""), http.StatusBadRequest, "title is required")
 
