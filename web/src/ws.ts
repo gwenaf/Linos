@@ -9,6 +9,20 @@ export const onHostMachine = ['localhost', '127.0.0.1', '[::1]'].includes(locati
 // The cookie only shows the controls; the server checks the real admin cookie.
 export const isLocalPage = onHostMachine || document.cookie.split('; ').includes('linos_host=1')
 
+let rights: Promise<boolean> | undefined
+
+/**
+ * Asks the server whether this browser has the host's rights (the host machine, or signed in at
+ * /login): a host-only route answers. The address bar cannot tell, a container on this PC sees
+ * localhost as another machine.
+ */
+export function hostRights(): Promise<boolean> {
+  rights ??= fetch('/api/join', { method: 'HEAD' })
+    .then((r) => r.ok)
+    .catch(() => false)
+  return rights
+}
+
 export function store(key: string, value?: string | null): string | null {
   try {
     if (value === undefined) return localStorage.getItem(key)

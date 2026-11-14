@@ -67,7 +67,7 @@ docker run -d -p 49154:49154 -v linos:/data \
   ghcr.io/gwenaf/linos:v0.1.0
 ```
 
-Gardez ce jeton (`docker inspect` le retrouve) et connectez-vous avec sur `/login` pour piloter la partie et éditer les packs. Sans jeton, seules les pages des joueurs répondent. Le HTTPS (via un reverse proxy) et la sécurité du serveur restent à votre charge.
+Gardez ce jeton (`docker inspect` le retrouve) et ouvrez `/control` depuis n'importe quel poste : la page demande ce jeton pour piloter la partie et éditer les packs. Sans jeton, seules les pages des joueurs répondent. Le HTTPS (via un reverse proxy) et la sécurité du serveur restent à votre charge.
 
 ## Vérifier un téléchargement
 

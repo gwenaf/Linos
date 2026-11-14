@@ -1,5 +1,5 @@
 import { signal } from '@preact/signals'
-import { connect, isLocalPage, onHostMachine, store, type Data } from './ws'
+import { connect, hostRights, onHostMachine, store, type Data } from './ws'
 import { Answers, Banner, Qr, Results, Scores, chooserName, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
@@ -7,9 +7,11 @@ const invite = new URLSearchParams(location.search).get('invite')
 // /control?pack=<name>: the editor's "Jouer ce pack" loads that pack once, with its default control.
 let packToPlay = new URLSearchParams(location.search).get('pack')
 
-// On the host machine the page is control by origin; a gamemaster phone joins with an invite, then its token.
+// With the host's rights the page is control by origin; a gamemaster phone or post joins with an
+// invite, then its token. isLocalPage shows the host controls.
+const isLocalPage = !invite && (await hostRights())
 const conn =
-  isLocalPage && !invite
+  isLocalPage
     ? connect('control')
     : connect('player', () => {
         const token = store(MASTER_TOKEN)
@@ -50,7 +52,7 @@ const firewallResult = signal('')
 
 // A self-hosted server is joined at the address its admin uses; the local network helpers do not apply.
 if (isLocalPage && !onHostMachine) joinUrls.value = [`${location.origin}/play`]
-if (onHostMachine) {
+if (isLocalPage && onHostMachine) {
   fetch('/api/join')
     .then((r) => r.json())
     .then((d) => (joinUrls.value = d.urls))
@@ -145,7 +147,7 @@ const base = () => joinUrls.value[0]?.replace(/\/play$/, '') ?? location.origin
 conn.on('master-invite', (d) => {
   inviteQr.value = {
     url: `${base()}/control?invite=${d.code}`,
-    caption: 'Scannez avec le téléphone du maître du jeu (valable 2 minutes, usage unique)',
+    caption: 'Scannez avec le téléphone du maître du jeu, ou ouvrez ce lien sur un autre poste (valable 2 minutes, usage unique)',
   }
 })
 conn.on('reconnect-invite', (d) => {
@@ -214,7 +216,7 @@ export default function Control() {
         {isLocalPage && <a href="/edit">Éditeur de packs</a>}
         <span class={conn.connected.value ? 'status ok' : 'status'}>{conn.connected.value ? 'Connecté' : 'Reconnexion…'}</span>
         {isLocalPage && <button onClick={() => window.open('/host', 'linos-host')}>Ouvrir l'écran de jeu</button>}
-        {isLocalPage && <button onClick={() => conn.send('master-invite')}>Téléphone maître du jeu</button>}
+        {isLocalPage && <button onClick={() => conn.send('master-invite')}>Inviter un maître du jeu</button>}
       </header>
       {conn.error.value && (
         <p class="error" onClick={() => (conn.error.value = '')}>
@@ -224,6 +226,16 @@ export default function Control() {
       {inviteQr.value && (
         <section onClick={() => (inviteQr.value = null)}>
           <Qr url={inviteQr.value.url} caption={inviteQr.value.caption} />
+          {navigator.clipboard && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                navigator.clipboard.writeText(inviteQr.value!.url).then(() => logEvent('Lien d’invitation copié'))
+              }}
+            >
+              Copier le lien
+            </button>
+          )}
         </section>
       )}
       {inLobby ? <Lobby /> : <Game />}

@@ -9,9 +9,16 @@ function report(message: string, stack?: string) {
 window.addEventListener('error', (e) => report(e.message, e.error?.stack))
 window.addEventListener('unhandledrejection', (e) => report(String(e.reason), e.reason?.stack))
 
+// mayControl tells whether this browser can pilot: with an invite or a gamemaster token already
+// stored, or with the host's rights (the host machine, or signed in), which a host-only route answers.
+async function mayControl() {
+  const { hostRights, store } = await import('./ws')
+  return new URLSearchParams(location.search).has('invite') || !!store('linos-master') || hostRights()
+}
+
 // Each page is its own chunk: phones never download the control or host code.
 const pages: Record<string, () => Promise<{ default: () => preact.JSX.Element }>> = {
-  '/control': () => import('./control'),
+  '/control': async () => ((await mayControl()) ? import('./control') : import('./access')),
   '/host': () => import('./host'),
   '/play': () => import('./play'),
   '/edit': () => import('./edit'),
