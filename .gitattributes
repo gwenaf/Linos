@@ -1,0 +1,4 @@
+# LF everywhere, whatever core.autocrlf says: gofmt and the shell scripts need it.
+* text=auto eol=lf
+*.wav binary
+*.png binary
