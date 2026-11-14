@@ -152,7 +152,7 @@ macOS affiche une demande similaire, répétée à chaque version pour une appli
 
 ### Serveur auto-hébergé (Docker, VPS)
 
-Image `ghcr.io/gwenaf/linos:<version>` (publiée à chaque release, `Dockerfile` à la racine) : `scratch`, sans shell, utilisateur non privilégié (UID 65534), packs dans `packs/` du volume `/data`.
+Image `ghcr.io/gwenaf/linos:<version>` et `latest` (publiée à chaque release, `Dockerfile` à la racine, avec une attestation de provenance signée comme les binaires) : `scratch`, sans shell, utilisateur non privilégié (UID 65534), packs dans `packs/` du volume `/data`.
 
 Linos ne doit pas devenir un point d'entrée sur le serveur ; le reste (HTTPS, pare-feu, mises à jour) relève de son administrateur.
 

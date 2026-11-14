@@ -59,7 +59,7 @@ Le format des packs est décrit dans [`docs/manifest.example.json`](docs/manifes
 
 ## Héberger sur un serveur
 
-Une image Docker est publiée à chaque release, sous le numéro de version (`v0.1.0`…) :
+Une image Docker est publiée à chaque release, sous le numéro de version (`v0.1.0`…) et `latest` :
 
 ```sh
 docker run -d -p 49154:49154 -v linos:/data \
@@ -67,7 +67,16 @@ docker run -d -p 49154:49154 -v linos:/data \
   ghcr.io/gwenaf/linos:v0.1.0
 ```
 
-Connectez-vous sur `/login` avec ce jeton pour piloter la partie et éditer les packs. Sans jeton, seules les pages des joueurs répondent. Le HTTPS (via un reverse proxy) et la sécurité du serveur restent à votre charge.
+Gardez ce jeton (`docker inspect` le retrouve) et connectez-vous avec sur `/login` pour piloter la partie et éditer les packs. Sans jeton, seules les pages des joueurs répondent. Le HTTPS (via un reverse proxy) et la sécurité du serveur restent à votre charge.
+
+## Vérifier un téléchargement
+
+Chaque binaire et chaque image Docker est accompagné d'une attestation signée (Sigstore, via GitHub) : elle prouve qu'il a été construit par le workflow de release de ce dépôt, depuis le code du tag. Avec la [CLI GitHub](https://cli.github.com) :
+
+```sh
+gh attestation verify linos-linux-amd64 --repo gwenaf/Linos
+gh attestation verify oci://ghcr.io/gwenaf/linos:v0.1.0 --repo gwenaf/Linos
+```
 
 ## Configuration
 
@@ -76,6 +85,7 @@ Connectez-vous sur `/login` avec ce jeton pour piloter la partie et éditer les 
 | `LINOS_HOME` | Dossier de `packs/` et `linos.log` (défaut : celui de l'exécutable) |
 | `LINOS_ADDR` | Adresse d'écoute (défaut `:49154`) |
 | `LINOS_ADMIN_TOKEN` | Active `/login` pour piloter un serveur (32 caractères minimum) |
+| `LINOS_PUBLIC_URL` | Adresse donnée aux joueurs (code QR) quand Linos ne la voit pas : Docker, reverse proxy. Ex. `https://quiz.example` |
 | `LINOS_EDIT` | `off` désactive l'éditeur |
 | `LINOS_BROWSER` | `off` n'ouvre pas le navigateur au lancement |
 | `LINOS_LOG_LEVEL` | `debug` pour tout journaliser |
@@ -85,7 +95,6 @@ Connectez-vous sur `/login` avec ce jeton pour piloter la partie et éditer les 
 Prérequis : [Go](https://go.dev) et [Node.js](https://nodejs.org).
 
 ```sh
-| `LINOS_PUBLIC_URL` | Adresse donnée aux joueurs (code QR) quand Linos ne la voit pas : Docker, reverse proxy. Ex. `https://quiz.example` |
 git config core.hooksPath .githooks          # vérifications avant chaque commit
 cd web && npm install && npm run build && cd ..
 go test ./...

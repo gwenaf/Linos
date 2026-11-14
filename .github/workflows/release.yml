@@ -11,6 +11,9 @@ on:
 permissions:
   contents: write
   packages: write
+  # Signed build provenance (Sigstore, through GitHub) for the binaries and the image.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -63,6 +66,12 @@ jobs:
           wait-for-completion: true
           output-artifact-directory: out
 
+      # Each binary gets a signed provenance: built by this workflow, from this commit. Checked with
+      # gh attestation verify <file> --repo gwenaf/Linos
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: out/*
+
       - name: Publish the release
         run: |
           prerelease=
@@ -77,8 +86,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      # The version tag, and latest for a final release.
+      - id: tags
+        run: |
+          image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/linos
+          tags=$image:$GITHUB_REF_NAME
+          [[ "$GITHUB_REF_NAME" != *-* ]] && tags=$tags,$image:latest
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - id: image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/linos:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}
+      # The image's signed provenance is pushed next to it. Checked with
+      # gh attestation verify oci://ghcr.io/gwenaf/linos:<version> --repo gwenaf/Linos
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-name: ${{ steps.tags.outputs.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
