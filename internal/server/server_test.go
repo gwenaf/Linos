@@ -50,7 +50,7 @@ func check(t *testing.T, h http.Handler, cases []request) {
 const local, phone = "127.0.0.1:5000", "192.168.1.20:5000"
 
 func TestPages(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web, false)
+	h := New(game.NewRoom(t.TempDir()), web, Options{})
 	check(t, h, []request{
 		{"health", "/health", phone, http.StatusOK, "ok"},
 		{"control page", "/control", local, http.StatusOK, "id=app"},
@@ -78,7 +78,7 @@ func TestMedia(t *testing.T) {
 			break
 		}
 	}
-	check(t, New(room, web, false), []request{
+	check(t, New(room, web, Options{}), []request{
 		{"host machine", "/media/a.mp3", local, http.StatusOK, "audio"},
 		{"phone", "/media/a.mp3", phone, http.StatusForbidden, ""},
 		{"not in manifest", "/media/manifest.json", local, http.StatusNotFound, ""},
@@ -86,7 +86,7 @@ func TestMedia(t *testing.T) {
 }
 
 func TestJoinAndQR(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web, false)
+	h := New(game.NewRoom(t.TempDir()), web, Options{})
 	check(t, h, []request{
 		{"join from phone", "/api/join", phone, http.StatusForbidden, ""},
 		{"qr", "/qr.png?data=http://192.168.1.10:7777/play", local, http.StatusOK, "PNG"},
@@ -112,7 +112,7 @@ func TestJoinAndQR(t *testing.T) {
 }
 
 func TestFrontErrorReport(t *testing.T) {
-	h := New(game.NewRoom(t.TempDir()), web, false)
+	h := New(game.NewRoom(t.TempDir()), web, Options{})
 	post := func(body string) int {
 		req := httptest.NewRequest("POST", "/api/log", strings.NewReader(body))
 		req.RemoteAddr = phone
@@ -129,10 +129,48 @@ func TestFrontErrorReport(t *testing.T) {
 	if code := post(`{"message":"` + strings.Repeat("a", maxFrontReport) + `"}`); code != http.StatusBadRequest {
 		t.Errorf("oversized report: %d, want 400", code)
 	}
+	// A flood is cut off: 3 reports were counted above.
+	for range maxFrontReports - 3 {
+		post(`{"message":"x"}`)
+	}
+	if code := post(`{"message":"x"}`); code != http.StatusTooManyRequests {
+		t.Errorf("report past the limit: %d, want 429", code)
+	}
+}
+
+func TestLogFileLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "linos.log")
+	os.WriteFile(path, []byte("old;"), 0o644)
+	l, err := OpenLog(path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"aaaa;", "bbbb;", "c;"} { // 4+5 bytes fit, the next starts a new file
+		if _, err := l.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Close()
+	current, _ := os.ReadFile(path)
+	previous, _ := os.ReadFile(path + ".1")
+	if string(previous) != "old;aaaa;" || string(current) != "bbbb;c;" {
+		t.Fatalf("linos.log = %q, linos.log.1 = %q", current, previous)
+	}
+
+	if _, err := OpenLog(dir, 10); err == nil {
+		t.Fatal("a folder cannot be the journal")
+	}
+	l, _ = OpenLog(path, 1)
+	defer l.Close()
+	l.path = filepath.Join(dir, "gone", "linos.log") // the new file cannot be created
+	if _, err := l.Write([]byte("x")); err == nil {
+		t.Fatal("a journal that cannot restart must report it")
+	}
 }
 
 func TestWebSocketThroughRequestLog(t *testing.T) {
-	srv := httptest.NewServer(New(game.NewRoom(t.TempDir()), web, false))
+	srv := httptest.NewServer(New(game.NewRoom(t.TempDir()), web, Options{}))
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -155,7 +193,7 @@ func TestNetworkHelpers(t *testing.T) {
 	t.Cleanup(func() { network.Command = prev })
 	var fail error
 	network.Command = func(string, ...string) ([]byte, error) { return []byte("Public"), fail }
-	h := New(game.NewRoom(t.TempDir()), web, false)
+	h := New(game.NewRoom(t.TempDir()), web, Options{})
 
 	check(t, h, []request{{"network info", "/api/network", local, http.StatusOK, `"hotspot":"192.168.137."`}})
 
@@ -191,9 +229,41 @@ func TestStart(t *testing.T) {
 	}
 }
 
+func TestOpenBrowser(t *testing.T) {
+	oldStart, oldOS := Start, goos
+	t.Cleanup(func() { Start, goos = oldStart, oldOS })
+	var got []string
+	Start = func(name string, args ...string) error {
+		got = append(got, name+" "+strings.Join(args, " "))
+		return nil
+	}
+	for _, goos = range []string{"windows", "darwin", "linux"} {
+		OpenBrowser("http://localhost:7777/control")
+	}
+	want := []string{
+		rundll32() + " url.dll,FileProtocolHandler http://localhost:7777/control",
+		"open http://localhost:7777/control",
+		"xdg-open http://localhost:7777/control",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("commands = %q", got)
+	}
+}
+
+func TestRundll32Path(t *testing.T) {
+	t.Setenv("SystemRoot", "")
+	if got := rundll32(); got != filepath.Join(`C:\Windows`, "System32", "rundll32.exe") {
+		t.Fatalf("rundll32 without SystemRoot = %s", got)
+	}
+	t.Setenv("SystemRoot", `D:\Win`)
+	if got := rundll32(); got != filepath.Join(`D:\Win`, "System32", "rundll32.exe") {
+		t.Fatalf("rundll32 = %s", got)
+	}
+}
+
 func TestImport(t *testing.T) {
 	room := game.NewRoom(t.TempDir())
-	h := New(room, web, false)
+	h := New(room, web, Options{Edit: true})
 	post := func(remote, origin, contentType string, body *bytes.Buffer) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/import?start=10&duration=20&via=device", body)
 		req.RemoteAddr, req.Host = remote, "localhost:7777"

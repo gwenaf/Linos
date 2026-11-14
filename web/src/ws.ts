@@ -4,7 +4,10 @@ import { signal } from '@preact/signals'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Data = any
 
-export const isLocalPage = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+export const onHostMachine = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)
+// Pages with the host's rights: on the host machine, or signed in at /login on a self-hosted server.
+// The cookie only shows the controls; the server checks the real admin cookie.
+export const isLocalPage = onHostMachine || document.cookie.split('; ').includes('linos_host=1')
 
 export function store(key: string, value?: string | null): string | null {
   try {

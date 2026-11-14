@@ -11,13 +11,14 @@ import (
 	"github.com/gwenaf/linos/internal/game"
 )
 
-func Handler(room *game.Room) http.Handler {
+// Handler connects websockets to room. isHost grants the control and host roles: see IsLocal.
+func Handler(room *game.Room, isHost func(*http.Request) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		role := game.RolePlayer
 		switch q := req.URL.Query().Get("role"); q {
 		case "", game.RolePlayer:
 		case game.RoleControl, game.RoleHost:
-			if !IsLocal(req) {
+			if !isHost(req) {
 				slog.Warn("websocket role refused", "role", q, "remote", req.RemoteAddr, "host", req.Host)
 				http.Error(w, "role reserved to the host machine; use a gamemaster invite", http.StatusForbidden)
 				return

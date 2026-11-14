@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
-import { connect, isLocalPage, store, type Data } from './ws'
-import { Answers, Banner, Qr, Results, Scores, droppedFiles, scoreKey, scoreTable, unitName } from './ui'
+import { connect, isLocalPage, onHostMachine, store, type Data } from './ws'
+import { Answers, Banner, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -41,16 +41,14 @@ const eliminated = signal<string[]>([])
 const tiebreak = signal<string[] | null>(null)
 const events = signal<string[]>([])
 const logEvent = (text: string) => (events.value = [text, ...events.value].slice(0, 8))
-const importStatus = signal('')
-const importStart = signal(30)
-const importDuration = signal(30)
-const dragging = signal(false)
 
 const network = signal<Data>(null)
 const showHelp = signal(false)
 const firewallResult = signal('')
 
-if (isLocalPage) {
+// A self-hosted server is joined at the address its admin uses; the local network helpers do not apply.
+if (isLocalPage && !onHostMachine) joinUrls.value = [`${location.origin}/play`]
+if (onHostMachine) {
   fetch('/api/join')
     .then((r) => r.json())
     .then((d) => (joinUrls.value = d.urls))
@@ -61,29 +59,6 @@ if (isLocalPage) {
   setTimeout(() => {
     if (lobby.value.players.length === 0) showHelp.value = true
   }, 30_000)
-}
-
-const AUDIO = /\.(mp3|m4a|aac|ogg|opus|flac|wav)$/i
-
-async function importMusic(files: File[]) {
-  const audio = files.filter((f) => AUDIO.test(f.name))
-  if (audio.length === 0) {
-    importStatus.value = 'Aucun fichier audio (mp3, m4a, aac, ogg, opus, flac, wav).'
-    return
-  }
-  importStatus.value = `Import de ${audio.length} fichier(s)…`
-  const form = new FormData()
-  audio.forEach((f) => form.append('files', f, f.name))
-  const via = controlMode.value === 'auto' ? 'device' : ''
-  const res = await fetch(`/api/import?start=${importStart.value}&duration=${importDuration.value}&via=${via}`, { method: 'POST', body: form })
-  if (!res.ok) {
-    importStatus.value = `Échec de l'import : ${await res.text()}`
-    return
-  }
-  const d = await res.json()
-  importStatus.value = `${d.tracks} piste(s) importée(s) dans le pack ${d.pack}.`
-  conn.send('list-packs')
-  conn.send('configure', { pack: d.pack, control: controlMode.value })
 }
 
 async function allowFirewall() {
@@ -302,7 +277,11 @@ function Lobby() {
             Aucun pack trouvé dans <code>{packsDir.value}</code> : placez-y un dossier de pack ou un fichier .linospack, puis actualisez.
           </p>
         )}
-        {isLocalPage && <ImportMusic />}
+        {isLocalPage && (
+          <p>
+            <a href="/edit">Créer un pack depuis vos musiques, ou ajouter un .linospack reçu</a>
+          </p>
+        )}
         <ul class="packs">
           {packs.value.map((p) => (
             <li key={p.name}>
@@ -340,46 +319,6 @@ function Lobby() {
         {configured.value && state.value !== 'ready' && <small>Tous les joueurs connectés doivent être prêts.</small>}
       </section>
     </>
-  )
-}
-
-function ImportMusic() {
-  const onDrop = (e: DragEvent) => {
-    e.preventDefault()
-    dragging.value = false
-    // Entries must be read during the drop event; the item list is emptied once it returns.
-    const entries = [...(e.dataTransfer?.items ?? [])].map((i) => i.webkitGetAsEntry()).filter((x): x is FileSystemEntry => !!x)
-    droppedFiles(entries).then(importMusic)
-  }
-  const onPick = (e: Event) => importMusic([...((e.target as HTMLInputElement).files ?? [])])
-  return (
-    <div
-      class={dragging.value ? 'dropzone over' : 'dropzone'}
-      onDragOver={(e) => {
-        e.preventDefault()
-        dragging.value = true
-      }}
-      onDragLeave={() => (dragging.value = false)}
-      onDrop={onDrop}
-    >
-      <p>
-        <strong>Import rapide</strong> : déposez ici un dossier ou des fichiers audio. Artiste et titre sont lus dans les tags, sinon dans le nom
-        « Artiste - Titre ».
-      </p>
-      <label>
-        Début des extraits (s) <input type="number" min={0} value={importStart.value} onInput={(e) => (importStart.value = Number((e.target as HTMLInputElement).value))} />
-      </label>
-      <label>
-        Durée (s) <input type="number" min={1} value={importDuration.value} onInput={(e) => (importDuration.value = Number((e.target as HTMLInputElement).value))} />
-      </label>
-      <label>
-        Fichiers <input type="file" multiple accept="audio/*" onChange={onPick} />
-      </label>
-      <label>
-        Dossier <input type="file" {...{ webkitdirectory: '' }} onChange={onPick} />
-      </label>
-      {importStatus.value && <p>{importStatus.value}</p>}
-    </div>
   )
 }
 

@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/gwenaf/linos/internal/ws"
@@ -50,19 +52,83 @@ func logRequests(h http.Handler) http.Handler {
 // maxFrontReport bounds what a page may write to the journal.
 const maxFrontReport = 8 << 10
 
-// frontError journals a JavaScript error reported by a page, so phone and host crashes show up in linos.log.
-func frontError(w http.ResponseWriter, r *http.Request) {
-	var report struct {
-		Page    string `json:"page"`
-		Message string `json:"message"`
-		Stack   string `json:"stack"`
+// maxFrontReports per minute, for all pages together: on a public server anyone can post reports,
+// and a real crash sends a handful at most. Past it, reports are dropped until the next minute.
+const maxFrontReports = 30
+
+// frontErrors journals the JavaScript errors reported by the pages, so phone and host crashes show
+// up in linos.log.
+func frontErrors() http.HandlerFunc {
+	var mu sync.Mutex
+	var window time.Time
+	count := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if now := time.Now(); now.Sub(window) >= time.Minute {
+			window, count = now, 0
+		}
+		count++
+		over := count > maxFrontReports
+		mu.Unlock()
+		if over {
+			http.Error(w, "too many reports", http.StatusTooManyRequests)
+			return
+		}
+		var report struct {
+			Page    string `json:"page"`
+			Message string `json:"message"`
+			Stack   string `json:"stack"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFrontReport)).Decode(&report); err != nil {
+			http.Error(w, "invalid report", http.StatusBadRequest)
+			return
+		}
+		slog.Warn("front error", "page", report.Page, "message", report.Message, "stack", report.Stack,
+			"remote", r.RemoteAddr, "userAgent", r.UserAgent())
+		w.WriteHeader(http.StatusNoContent)
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxFrontReport)).Decode(&report); err != nil {
-		http.Error(w, "invalid report", http.StatusBadRequest)
-		return
+}
+
+// LogFile is the journal file, kept under a size limit whatever is logged: past it, the file
+// becomes <path>.1, replacing the previous one, and a new file starts. At most twice the limit
+// stays on disk, even on a public server flooded with requests.
+type LogFile struct {
+	mu    sync.Mutex
+	path  string
+	limit int64
+	f     *os.File
+	size  int64
+}
+
+// OpenLog opens the journal at path for appending.
+func OpenLog(path string, limit int64) (*LogFile, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
 	}
-	// ponytail: no rate limit; a misbehaving page can fill the journal 8 KB at a time.
-	slog.Warn("front error", "page", report.Page, "message", report.Message, "stack", report.Stack,
-		"remote", r.RemoteAddr, "userAgent", r.UserAgent())
-	w.WriteHeader(http.StatusNoContent)
+	info, _ := f.Stat() // just opened
+	return &LogFile{path: path, limit: limit, f: f, size: info.Size()}, nil
+}
+
+func (l *LogFile) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.size > 0 && l.size+int64(len(p)) > l.limit {
+		l.f.Close()
+		os.Rename(l.path, l.path+".1") // on failure the file is truncated below: the limit wins over old lines
+		f, err := os.OpenFile(l.path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+		if err != nil {
+			return 0, err
+		}
+		l.f, l.size = f, 0
+	}
+	n, err := l.f.Write(p)
+	l.size += int64(n)
+	return n, err
+}
+
+func (l *LogFile) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.f.Close()
 }

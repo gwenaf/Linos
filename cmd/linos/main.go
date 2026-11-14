@@ -34,7 +34,8 @@ func main() {
 		}
 		home = filepath.Dir(exe)
 	}
-	logFile, err := os.OpenFile(filepath.Join(home, "linos.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	os.MkdirAll(home, 0o755) // a package manager may point it at a folder to create; OpenFile reports a failure
+	logFile, err := server.OpenLog(filepath.Join(home, "linos.log"), 10<<20)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -57,8 +58,23 @@ func main() {
 	}
 	packs := filepath.Join(home, "packs")
 	slog.Info("starting", "home", home, "packs", packs, "webDir", os.Getenv("LINOS_WEB_DIR"), "joinAddresses", network.LocalIPs())
-	// LINOS_EDIT=off removes the pack editor, e.g. on a self-hosted server.
-	if err := run(ctx, ln, server.New(game.NewRoom(packs), front, os.Getenv("LINOS_EDIT") != "off")); err != nil {
+	// LINOS_ADMIN_TOKEN lets a browser sign in at /login to run a self-hosted server. It is the only
+	// barrier to the host's rights there, hence a length that rules out guessing.
+	token := os.Getenv("LINOS_ADMIN_TOKEN")
+	if token != "" && len(token) < 32 {
+		slog.Error("LINOS_ADMIN_TOKEN must be at least 32 characters, e.g. openssl rand -base64 32")
+		os.Exit(1)
+	}
+	// LINOS_EDIT=off removes the pack editor.
+	opts := server.Options{Edit: os.Getenv("LINOS_EDIT") != "off", AdminToken: token}
+	// A double-click on the executable lands on the control page. Not on a server, nor with
+	// LINOS_BROWSER=off (tests, development); a machine without a browser just logs it.
+	if token == "" && os.Getenv("LINOS_BROWSER") != "off" {
+		if err := server.OpenBrowser("http://localhost:" + portOf(ln) + "/control"); err != nil {
+			slog.Info("browser not opened", "error", err)
+		}
+	}
+	if err := run(ctx, ln, server.New(game.NewRoom(packs), front, opts)); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -73,7 +89,13 @@ func newLogger(w io.Writer, level string) *slog.Logger {
 
 // run serves until ctx is cancelled, then shuts down gracefully.
 func run(ctx context.Context, ln net.Listener, h http.Handler) error {
-	srv := &http.Server{Handler: h, ErrorLog: slog.NewLogLogger(slog.Default().Handler(), slog.LevelError)}
+	// ReadHeaderTimeout closes connections that never finish their headers (slowloris). No overall
+	// timeout: media streams and websockets stay open for the whole game.
+	srv := &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 	slog.Info("listening", "control", "http://localhost:"+portOf(ln)+"/control")

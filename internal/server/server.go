@@ -6,38 +6,50 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/skip2/go-qrcode"
 
 	"github.com/gwenaf/linos/internal/game"
 	"github.com/gwenaf/linos/internal/network"
-	"github.com/gwenaf/linos/internal/tags"
 	"github.com/gwenaf/linos/internal/ws"
 )
 
+// Options configure what the server exposes.
+type Options struct {
+	// Edit enables the pack editor.
+	Edit bool
+	// AdminToken, when set, gives a browser that signs in at /login the host machine's rights:
+	// the way to run a game on a self-hosted server.
+	AdminToken string
+}
+
 // New serves the game: the pages from web (the built front), the websocket and the host-only helpers.
-// edit enables the pack editor.
-func New(room *game.Room, web fs.FS, edit bool) http.Handler {
+func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
-	mux.Handle("GET /ws", ws.Handler(room))
+	isHost := hostRights(opts.AdminToken)
+	hostOnly := restrict(isHost)
+	mux.Handle("GET /ws", ws.Handler(room, isHost))
+	if opts.AdminToken != "" {
+		adminLogin(mux, opts.AdminToken)
+	}
 
 	page := func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, web, "index.html") }
 	mux.HandleFunc("GET /control", page)
 	mux.HandleFunc("GET /host", page)
 	mux.HandleFunc("GET /play", page)
-	if edit {
-		editor(mux, room.PacksDir(), page)
+	if opts.Edit {
+		editor(mux, room.PacksDir(), page, hostOnly)
 	}
 	mux.Handle("GET /assets/", http.FileServerFS(web))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		target := "/play"
-		if ws.IsLocal(r) {
+		if isHost(r) {
 			target = "/control"
 		}
 		http.Redirect(w, r, target, http.StatusFound)
@@ -52,6 +64,7 @@ func New(room *game.Room, web fs.FS, edit bool) http.Handler {
 			return
 		}
 		defer f.Close()
+		inert(w)
 		http.ServeContent(w, r, name, time.Time{}, f)
 	}))
 
@@ -88,27 +101,7 @@ func New(room *game.Room, web fs.FS, edit bool) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	mux.HandleFunc("POST /api/import", hostOnly(func(w http.ResponseWriter, r *http.Request) {
-		files, err := r.MultipartReader()
-		if err != nil {
-			http.Error(w, "expected a multipart upload of audio files", http.StatusBadRequest)
-			return
-		}
-		q := r.URL.Query()
-		start, _ := strconv.ParseFloat(q.Get("start"), 64)       // missing or invalid: 0
-		duration, _ := strconv.ParseFloat(q.Get("duration"), 64) // missing or invalid: pack default
-		res, err := tags.Import(room.PacksDir(), files, tags.Options{Start: max(start, 0), Duration: duration, Via: q.Get("via")})
-		if err != nil {
-			slog.Warn("import failed", "error", err)
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		slog.Info("music imported", "pack", res.Pack, "tracks", res.Tracks, "skipped", len(res.Skipped))
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
-	}))
-
-	mux.HandleFunc("POST /api/log", frontError)
+	mux.HandleFunc("POST /api/log", frontErrors())
 
 	mux.HandleFunc("GET /qr.png", hostOnly(func(w http.ResponseWriter, r *http.Request) {
 		png, err := qrcode.Encode(r.URL.Query().Get("data"), qrcode.Medium, 512)
@@ -122,18 +115,30 @@ func New(room *game.Room, web fs.FS, edit bool) http.Handler {
 	return logRequests(mux)
 }
 
-// hostOnly restricts a route to the host machine; posts from another web origin are refused too,
-// so a page open in the PC's browser cannot trigger them.
-func hostOnly(h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !ws.IsLocal(r) {
-			http.Error(w, "only available on the host machine", http.StatusForbidden)
-			return
+// inert keeps a pack file from ever running as a page, whatever its content: no type sniffing, and
+// sandboxed if a browser opens it directly.
+func inert(w http.ResponseWriter) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox")
+}
+
+// restrict returns hostOnly, which limits a route to requests with the host machine's rights; posts
+// from another web origin are refused too, so a page open in the same browser cannot trigger them.
+func restrict(isHost func(*http.Request) bool) func(http.HandlerFunc) http.HandlerFunc {
+	return func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !isHost(r) {
+				http.Error(w, "only available on the host machine", http.StatusForbidden)
+				return
+			}
+			// Scheme left out: behind an HTTPS reverse proxy the server itself is reached in HTTP.
+			if origin := r.Header.Get("Origin"); origin != "" {
+				if u, err := url.Parse(origin); err != nil || u.Host != r.Host {
+					http.Error(w, "cross-origin request refused", http.StatusForbidden)
+					return
+				}
+			}
+			h(w, r)
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
-			http.Error(w, "cross-origin request refused", http.StatusForbidden)
-			return
-		}
-		h(w, r)
 	}
 }
