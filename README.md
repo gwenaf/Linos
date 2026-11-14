@@ -85,6 +85,7 @@ Connectez-vous sur `/login` avec ce jeton pour piloter la partie et éditer les 
 Prérequis : [Go](https://go.dev) et [Node.js](https://nodejs.org).
 
 ```sh
+| `LINOS_PUBLIC_URL` | Adresse donnée aux joueurs (code QR) quand Linos ne la voit pas : Docker, reverse proxy. Ex. `https://quiz.example` |
 git config core.hooksPath .githooks          # vérifications avant chaque commit
 cd web && npm install && npm run build && cd ..
 go test ./...

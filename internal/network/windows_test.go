@@ -53,8 +53,11 @@ func TestAllowFirewall(t *testing.T) {
 		t.Fatal("a refused UAC prompt must be reported")
 	}
 
+	if !CanAllowFirewall() {
+		t.Fatal("Windows can allow the firewall")
+	}
 	goos = "darwin"
-	if err := AllowFirewall("linos"); !errors.Is(err, errors.ErrUnsupported) {
+	if err := AllowFirewall("linos"); !errors.Is(err, errors.ErrUnsupported) || CanAllowFirewall() {
 		t.Fatalf("outside Windows = %v, want unsupported", err)
 	}
 }

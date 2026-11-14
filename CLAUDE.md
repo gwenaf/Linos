@@ -66,6 +66,7 @@ Variables d'environnement :
 - `LINOS_ADDR` : adresse d'écoute (défaut `:49154`).
 - `LINOS_EDIT` : `off` désactive l'éditeur `/edit`.
 - `LINOS_ADMIN_TOKEN` : jeton (32 caractères min.) qui, saisi sur `/login`, donne les droits du PC hôte sur un serveur auto-hébergé. Désactive l'ouverture du navigateur.
+- `LINOS_PUBLIC_URL` : adresse que les téléphones ouvrent (code QR), quand Linos ne la voit pas : conteneur, reverse proxy. Ex. `http://192.168.1.20:49154`, `https://quiz.example`.
 - `LINOS_BROWSER` : `off` n'ouvre pas le navigateur au démarrage (tests, développement).
 
 Le hook `pre-commit` vérifie `gofmt`, `go vet` et la couverture quand des `.go` sont stagés, et lance `npm run lint` / `typecheck` dans `web/` si ces scripts existent.

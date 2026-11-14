@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -24,6 +25,9 @@ type Options struct {
 	// AdminToken, when set, gives a browser that signs in at /login the host machine's rights:
 	// the way to run a game on a self-hosted server.
 	AdminToken string
+	// PublicURL, when set, is the address the phones join (QR code): Linos cannot see it from a
+	// container or behind a reverse proxy.
+	PublicURL string
 }
 
 // New serves the game: the pages from web (the built front), the websocket and the host-only helpers.
@@ -77,6 +81,9 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 		for _, ip := range network.LocalIPs() {
 			urls = append(urls, "http://"+net.JoinHostPort(ip, port)+"/play")
 		}
+		if opts.PublicURL != "" {
+			urls = []string{strings.TrimSuffix(opts.PublicURL, "/") + "/play"}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string][]string{"urls": urls})
 	}))
@@ -87,6 +94,7 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 			"categories": network.Categories(),
 			"addresses":  network.LocalIPs(),
 			"hotspot":    network.HotspotPrefix,
+			"firewall":   network.CanAllowFirewall(),
 		})
 	}))
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -65,8 +66,14 @@ func main() {
 		slog.Error("LINOS_ADMIN_TOKEN must be at least 32 characters, e.g. openssl rand -base64 32")
 		os.Exit(1)
 	}
+	// LINOS_PUBLIC_URL is the address the phones join, when Linos cannot see it: in a container, behind a proxy.
+	public := os.Getenv("LINOS_PUBLIC_URL")
+	if u, err := url.Parse(public); public != "" && (err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "") {
+		slog.Error("LINOS_PUBLIC_URL must be an http or https address, e.g. http://192.168.1.20:49154")
+		os.Exit(1)
+	}
 	// LINOS_EDIT=off removes the pack editor.
-	opts := server.Options{Edit: os.Getenv("LINOS_EDIT") != "off", AdminToken: token}
+	opts := server.Options{Edit: os.Getenv("LINOS_EDIT") != "off", AdminToken: token, PublicURL: public}
 	// A double-click on the executable lands on the control page. Not on a server, nor with
 	// LINOS_BROWSER=off (tests, development); a machine without a browser just logs it.
 	if token == "" && os.Getenv("LINOS_BROWSER") != "off" {

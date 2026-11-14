@@ -21,6 +21,10 @@ func powershell(script string) ([]byte, error) {
 	return Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 }
 
+// CanAllowFirewall reports whether AllowFirewall can act here: on Windows only. In a container,
+// the firewall to open is the host machine's, out of Linos's reach.
+func CanAllowFirewall() bool { return goos == "windows" }
+
 // Categories returns the Windows network profile of each connection ("Public", "Private", "DomainAuthenticated").
 // A "Public" profile is where the firewall most often blocks phones. Empty outside Windows or on failure.
 func Categories() []string {

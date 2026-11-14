@@ -338,9 +338,17 @@ function NetworkHelp() {
         <li>
           Sur iPhone, un navigateur autre que Safari doit avoir l'autorisation « Réseau local » (Réglages › Confidentialité et sécurité › Réseau local).
         </li>
-        <li>
-          Autorisez Linos dans le pare-feu : <button onClick={allowFirewall}>Autoriser</button>
-        </li>
+        {network.value?.firewall ? (
+          <li>
+            Autorisez Linos dans le pare-feu : <button onClick={allowFirewall}>Autoriser</button>
+          </li>
+        ) : (
+          <li>
+            Linos tourne dans un conteneur (Docker) ou hors de Windows : il ne peut pas ouvrir le pare-feu lui-même. Sur la machine qui l'héberge,
+            autorisez en entrée le port <code>{location.port || '80'}</code> (TCP). Si le code QR montre une adresse en <code>172.</code>, lancez le
+            conteneur avec <code>LINOS_PUBLIC_URL</code> : l'adresse que les téléphones doivent ouvrir.
+          </li>
+        )}
         <li>
           Beaucoup de box et de Wi-Fi publics isolent les appareils entre eux. Solutions :
           <ul>

@@ -109,6 +109,10 @@ func TestJoinAndQR(t *testing.T) {
 			}
 		}
 	}
+
+	// In a container or behind a proxy, the address given at startup is the only one shown.
+	h = New(game.NewRoom(t.TempDir()), web, Options{PublicURL: "https://quiz.example/"})
+	check(t, h, []request{{"public address", "/api/join", local, http.StatusOK, `{"urls":["https://quiz.example/play"]}`}})
 }
 
 func TestFrontErrorReport(t *testing.T) {

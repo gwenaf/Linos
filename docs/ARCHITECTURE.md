@@ -158,6 +158,7 @@ Linos ne doit pas devenir un point d'entrée sur le serveur ; le reste (HTTPS, p
 
 - Sans `LINOS_ADMIN_TOKEN`, seules les pages joueurs répondent depuis une autre machine : `/control`, `/host`, `/edit`, `/media` et `/api/*` exigent l'adresse de bouclage.
 - `LINOS_ADMIN_TOKEN` (32 caractères au moins, sinon refus de démarrer ; par exemple `openssl rand -base64 32`) : le navigateur qui saisit ce jeton sur `/login` reçoit un cookie `HttpOnly`, `SameSite=Strict` (`Secure` derrière HTTPS, détecté par `X-Forwarded-Proto`) qui donne les droits du PC hôte. Comparaison en temps constant, échecs journalisés, jamais le jeton. Un second cookie lisible, sans valeur de sécurité, indique seulement aux pages d'afficher les contrôles hôte.
+- `LINOS_PUBLIC_URL` (adresse http ou https, sinon refus de démarrer) : adresse donnée aux joueurs par `/api/join` (code QR), à la place des adresses locales, qu'un conteneur ou un serveur derrière un reverse proxy ne voit pas. `/api/network` indique aussi si Linos peut ouvrir le pare-feu (`firewall` : Windows seulement) ; sinon la page de pilotage explique quel port ouvrir sur la machine hôte.
 - Contrôle d'origine : les requêtes d'une autre origine sont refusées (hôte comparé sans le schéma, pour fonctionner derrière un proxy HTTPS) ; le WebSocket applique le même contrôle.
 - Le QR code d'un serveur reprend l'adresse utilisée par l'administrateur (`location.origin`).
 - Sur un serveur du réseau local, `--network host` donne au QR code l'IP du réseau et laisse sortir l'annonce mDNS.
