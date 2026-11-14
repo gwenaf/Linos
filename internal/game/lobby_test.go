@@ -189,3 +189,69 @@ func TestKickInLobby(t *testing.T) {
 		t.Fatalf("players = %+v, want none", lobby.Players)
 	}
 }
+
+// Tricksters: names nobody can read are refused, hidden control characters dropped.
+func TestUnreadableNames(t *testing.T) {
+	r := newRoom(t, nil)
+	c := join(r, RolePlayer, nil)
+	expect(t, c, "welcome", nil)
+	for _, name := range []string{"​", "ㅤㅤ", "⠀", " ‮ "} {
+		send(r, c, "identify", map[string]string{"name": name})
+		expectError(t, c, "invalid-name")
+	}
+	send(r, c, "identify", map[string]string{"name": "‮bob\n"})
+	awaitLobby(t, c, func(l lobbyUpdate) bool { return len(l.Players) == 1 && l.Players[0].Name == "bob" })
+}
+
+// A connection that leaves without a name leaves no player behind: its token is forgotten.
+func TestUnnamedPlayersAreForgotten(t *testing.T) {
+	r := newRoom(t, nil)
+	var w struct {
+		Token string `json:"token"`
+	}
+	c := join(r, RolePlayer, nil)
+	expect(t, c, "welcome", &w)
+	r.Disconnect(c.Client)
+	again := join(r, RolePlayer, map[string]string{"token": w.Token})
+	var w2 struct {
+		Token string `json:"token"`
+	}
+	expect(t, again, "welcome", &w2)
+	if w2.Token == w.Token {
+		t.Fatal("an unnamed player must be forgotten when it leaves")
+	}
+	// A named one is kept, to come back.
+	send(r, again, "identify", map[string]string{"name": "carol"})
+	expect(t, again, "lobby-update", nil)
+	r.Disconnect(again.Client)
+	back := join(r, RolePlayer, map[string]string{"token": w2.Token})
+	var w3 struct {
+		Name string `json:"name"`
+	}
+	expect(t, back, "welcome", &w3)
+	if w3.Name != "carol" {
+		t.Fatalf("named player lost on reconnect: %+v", w3)
+	}
+}
+
+// Someone joining a running game then closing the page does not pause it; the next game counts them.
+func TestLateJoinerLeavingDoesNotPause(t *testing.T) {
+	r := newRoom(t, nil)
+	alice := newPlayer(t, r, "alice")
+	ctrl, _ := startGame(t, r, alice)
+	late, token := newPlayerWithToken(t, r, "mallory")
+	r.Disconnect(late.Client)
+	expectNo(t, r, ctrl, "game-paused")
+
+	send(r, ctrl, "end-game", nil)
+	expect(t, ctrl, "game-end", nil)
+	late = join(r, RolePlayer, map[string]string{"token": token})
+	expect(t, late, "welcome", nil)
+	startGame(t, r, alice, late)
+	r.Disconnect(late.Client)
+	var paused gamePaused
+	expect(t, ctrl, "game-paused", &paused)
+	if fmt.Sprint(paused.MissingPlayers) != "[mallory]" {
+		t.Fatalf("paused = %+v, want mallory missing once she played from the start", paused)
+	}
+}

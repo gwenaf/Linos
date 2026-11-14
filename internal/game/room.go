@@ -394,6 +394,10 @@ func (r *Room) drop(c *Client) {
 	c.closed = true
 	close(c.send)
 	delete(r.clients, c)
+	// A player that never chose a name is forgotten: reloads without storage and scripts leave nothing.
+	if p := c.player; p != nil && p.name == "" && p.client == c {
+		delete(r.players, p.token)
+	}
 	r.detach(c)
 	r.connectionsChanged()
 }

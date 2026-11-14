@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -48,16 +49,50 @@ func Handler(room *game.Room, isHost func(*http.Request) bool) http.Handler {
 			conn.Close(websocket.StatusNormalClosure, "")
 		}()
 
+		limit := bucket{tokens: burst, last: time.Now()}
+		flooding := false
 		for {
 			var m game.Message
 			if err := wsjson.Read(ctx, conn, &m); err != nil {
 				slog.Info("websocket disconnected", "role", role, "remote", req.RemoteAddr, "reason", err)
 				break
 			}
+			// A flood is dropped, not the client: what a person sends always goes through, a script
+			// cannot slow the game down or fill the journal.
+			if !limit.take(time.Now()) {
+				if !flooding {
+					slog.Warn("websocket flood, messages dropped", "role", role, "remote", req.RemoteAddr)
+				}
+				flooding = true
+				continue
+			}
+			flooding = false
 			room.Receive(c, m)
 		}
 		room.Disconnect(c)
 	})
+}
+
+// A connection may send burst messages at once, then rate per second: far more than a person tapping.
+const (
+	burst = 40
+	rate  = 20
+)
+
+// bucket is a token bucket: each message takes a token, tokens come back at rate per second.
+type bucket struct {
+	tokens float64
+	last   time.Time
+}
+
+func (b *bucket) take(now time.Time) bool {
+	b.tokens = min(burst, b.tokens+now.Sub(b.last).Seconds()*rate)
+	b.last = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
 }
 
 // IsLocal reports a request from the host machine. It also checks the Host header so a DNS-rebinding page opened on the host PC cannot claim control.

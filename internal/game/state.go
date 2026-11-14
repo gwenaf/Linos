@@ -31,7 +31,7 @@ func (r *Room) startGame(c *Client) {
 		t.score = 0
 	}
 	for _, p := range r.players {
-		p.score = 0
+		p.score, p.late = 0, false
 		if p.client == nil {
 			r.tolerated[p] = true
 		}
@@ -108,7 +108,7 @@ func (r *Room) connectionsChanged() {
 func (r *Room) missing() (host bool, players []string) {
 	players = []string{}
 	for _, p := range r.players {
-		if p.name != "" && p.client == nil && !r.tolerated[p] {
+		if p.name != "" && p.client == nil && !r.tolerated[p] && !p.late {
 			players = append(players, p.name)
 		}
 	}

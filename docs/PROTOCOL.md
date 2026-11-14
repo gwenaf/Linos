@@ -29,13 +29,14 @@ Sens : `C → S` client vers serveur, `S → C` serveur vers client(s).
 
 ### Connexion et lobby
 
+- Chaque connexion peut envoyer 40 messages d'affilée puis 20 par seconde ; au-delà, les messages sont ignorés sans couper la connexion.
 - `join` (C → S) : rejoindre la partie. Contient `token` (jeton de session ou de maître du jeu) s'il existe, ou `invite` (code d'invitation maître du jeu ou de reconnexion). Un seul salon par serveur : aucun nom de salon. Invitation inconnue ou expirée : `error` `invalid-invite`.
 - `welcome` (S → C) : réponse à `join`. Contient le jeton (nouveau ou confirmé), le rôle attribué par le serveur, le pseudonyme éventuel et l'état de la partie (`state`).
 - `master-invite` (C → S, `control`) : créer une invitation maître du jeu. Le serveur répond `master-invite` avec `code` et `expiresIn` (secondes).
 - `reconnect-invite` (C → S, `control`) : créer une invitation de reconnexion pour le joueur `name`, dont le téléphone a perdu son jeton. Le serveur répond `reconnect-invite` avec `code`, `name` et `expiresIn`. Le QR code affiché ouvre `/play?invite=<code>` : le téléphone reprend la place du joueur (jeton, nom, équipe, score). À usage unique, valable 2 minutes, annulée si le joueur est exclu. Joueur inconnu : `error` `unknown-player`.
 - `state` (S → C) : état complet de la partie, envoyé juste après chaque `welcome`, adapté au rôle. Contient toujours `state`, `lobby` (comme `lobby-update`), `scores` (comme `results` de `game-end`) et `configured` si un pack est choisi. Pendant une partie, contient aussi `track` (comme `track-start` pour ce rôle), `trackState` (`loading`, `live`, `ended`), `found` (éléments trouvés), `round`, `paused` (comme `game-paused`), `holder` (comme `buzz-accepted`), `elapsed` (secondes de piste jouées, si `live`), `trackEnd` (comme `track-end`, si `ended`), `eliminated`, `tiebreak` (équipes du départage), `pick` (comme `theme-pick-request`, pendant un choix de thème, sans `track`), `wager` (comme `wager-request`, pendant les mises, sans `track`) et, pour un joueur, `jokers` (restants), `doubled`, `canBuzz`, `canAnswer` et `answered` (éléments auxquels son équipe a déjà répondu, en mode simultané).
 - `leave` (C → S) : quitter le salon.
-- `identify` (C → S) : choisir son pseudonyme.
+- `identify` (C → S) : choisir son pseudonyme. Caractères de contrôle et de sens d'écriture retirés ; un nom sans caractère visible (espaces, caractères invisibles) est refusé (`invalid-name`). Un joueur qui ne s'est pas nommé est oublié à sa déconnexion : son jeton ne sert plus.
 - `join-team` (C → S) : rejoindre une équipe. Contient le nom de l'équipe ; l'équipe est créée si elle n'existe pas (8 au maximum, noms comparés sans tenir compte de la casse). Un nom vide quitte l'équipe. Une équipe vide et sans points est supprimée.
 - `lobby-update` (S → C) : `players` (pour chacun : `name`, `team`, `ready`, `connected`), `teams` (noms des équipes) et `state`. Envoyé à chaque changement de joueur, d'équipe, de statut prêt ou de connexion.
 - `list-packs` (C → S, `control`) : lister les packs du dossier `packs/`. Réponse `packs` : pour chacun `name`, `title` et `error` s'il est invalide ou utilise une fonction pas encore gérée.
@@ -108,7 +109,7 @@ Une « équipe » désigne ci-dessous une équipe (`team`) ou un joueur sans éq
 - `ready` : tous les joueurs identifiés et connectés sont prêts (au moins un). Seul état où `start-game` est accepté. Le serveur bascule automatiquement entre `lobby` et `ready`.
 - `in-progress` : la partie est en cours et les manches s'enchaînent.
 - `paused` : pause demandée par le maître du jeu. Personne ne peut buzzer ni répondre.
-- `technical-pause` : pause automatique quand l'écran hôte ou un joueur identifié perd la connexion. Personne ne peut buzzer ni répondre. Sortie automatique quand tout le monde est revenu, ou manuelle par `control` : `kick` du joueur absent, ou `resume` pour continuer sans lui (impossible sans écran hôte).
+- `technical-pause` : pause automatique quand l'écran hôte ou un joueur identifié perd la connexion. Un joueur qui s'est nommé pendant la partie ne la met pas en pause en partant (on ne peut pas bloquer une partie en la rejoignant puis en fermant la page) ; il compte à la partie suivante. Personne ne peut buzzer ni répondre. Sortie automatique quand tout le monde est revenu, ou manuelle par `control` : `kick` du joueur absent, ou `resume` pour continuer sans lui (impossible sans écran hôte).
 - Fin de partie (`end-game` ou `abort`) : `game-end` publie les résultats, puis la partie revient en `lobby`, tous les joueurs « pas prêts ». Équipes et joueurs sont conservés ; les scores repartent à zéro au prochain `start-game`.
 
 ### Manche (uniquement pendant `in-progress`)

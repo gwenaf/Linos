@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -22,6 +23,9 @@ type player struct {
 	ready  bool
 	team   *team
 	client *Client
+	// late players first named themselves during a game: their leaving never pauses it, so nobody can
+	// stop a game by joining and closing the page.
+	late bool
 }
 
 type team struct {
@@ -70,6 +74,9 @@ func (r *Room) identify(c *Client, m Message) {
 			r.sendError(c, "name-taken", "name already taken")
 			return
 		}
+	}
+	if c.player.name == "" && !slices.Contains(lobbyStates, r.state) {
+		c.player.late = true
 	}
 	c.player.name = name
 	r.broadcastLobby()
@@ -252,13 +259,29 @@ func (r *Room) lobbyPayload() map[string]any {
 	return map[string]any{"players": players, "teams": teams, "state": r.state}
 }
 
+// validName trims a player or team name and refuses one nobody could read: empty, too long, or made
+// only of invisible characters. Control and text-direction characters are removed.
 func (r *Room) validName(c *Client, raw string) (string, bool) {
-	name := strings.TrimSpace(raw)
-	if name == "" || utf8.RuneCountInString(name) > maxNameLen {
+	name := strings.TrimSpace(strings.Map(func(x rune) rune {
+		if unicode.IsControl(x) || unicode.Is(unicode.Bidi_Control, x) {
+			return -1
+		}
+		return x
+	}, raw))
+	if !strings.ContainsFunc(name, visible) || utf8.RuneCountInString(name) > maxNameLen {
 		r.sendError(c, "invalid-name", "name must be 1 to 32 characters")
 		return "", false
 	}
 	return name, true
+}
+
+// visible reports a character that shows: not a space, a format character or a blank letter.
+func visible(x rune) bool {
+	switch x {
+	case 'ᅟ', 'ᅠ', '⠀', 'ㅤ', 'ﾠ': // Hangul fillers, blank Braille pattern
+		return false
+	}
+	return unicode.IsGraphic(x) && !unicode.IsSpace(x) && !unicode.Is(unicode.Cf, x)
 }
 
 func (r *Room) teamByName(name string) *team {

@@ -112,3 +112,34 @@ func TestIsLocal(t *testing.T) {
 		}
 	}
 }
+
+// A flood is dropped past the burst; the connection stays open and is heard again shortly after.
+func TestFloodIsDropped(t *testing.T) {
+	srv := httptest.NewServer(Handler(game.NewRoom(t.TempDir()), IsLocal))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := dial(t, ctx, "ws"+strings.TrimPrefix(srv.URL, "http"))
+	joinAndRead(t, ctx, c, nil)
+	for range 500 {
+		wsjson.Write(ctx, c, game.NewMessage("spam", nil))
+	}
+	time.Sleep(300 * time.Millisecond)
+	wsjson.Write(ctx, c, game.NewMessage("identify", map[string]string{"name": "zed"}))
+	answered := 0
+	for {
+		var m game.Message
+		if err := wsjson.Read(ctx, c, &m); err != nil {
+			t.Fatalf("identify after the flood never answered: %v", err)
+		}
+		if m.Type == "lobby-update" && strings.Contains(string(m.Data), "zed") {
+			break
+		}
+		if m.Type == "error" {
+			answered++
+		}
+	}
+	if answered < burst-1 || answered > 2*burst {
+		t.Fatalf("%d of 500 flooded messages answered, want about the burst (%d)", answered, burst)
+	}
+}
