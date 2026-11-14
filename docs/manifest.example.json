@@ -127,7 +127,7 @@
     {
       "name": "Choix du thème",
       "selection": "theme-pick",
-      "picker": "rotation",
+      "picker": "last",
       "themes": ["fr", "clips", "intl"],
       "count": 3,
       "pickScope": "theme",

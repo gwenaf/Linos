@@ -96,6 +96,7 @@ type Room struct {
 	// wagers, double jokers, eliminated units and the units of a running tiebreak.
 	used          map[string]bool
 	picker        any
+	order         []any
 	picks         int
 	owner         any
 	headStartOver bool

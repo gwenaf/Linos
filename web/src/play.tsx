@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, store, type Data } from './ws'
-import { Answers, Banner, Results, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Results, chooserName, scoreKey, scoreTable, unitName } from './ui'
 
 const TOKEN = 'linos-player'
 // A reconnection invite (QR code shown by control) replaces a lost token, once.
@@ -237,6 +237,15 @@ function Lobby() {
         </datalist>
         <button>Valider l'équipe</button>
       </form>
+      {mine?.team && (
+        <p>
+          <small>
+            {mine.captain
+              ? 'Vous êtes capitaine : vous choisirez les thèmes pour votre équipe.'
+              : `Capitaine : ${lobby.value.players.find((p: Data) => p.team === mine.team && p.captain)?.name ?? '—'}, qui choisit les thèmes.`}
+          </small>
+        </p>
+      )}
       <button class={mine?.ready ? 'ready primary' : 'primary'} onClick={() => conn.send('ready', { ready: !mine?.ready })}>
         {mine?.ready ? 'Prêt ! (annuler)' : 'Je suis prêt'}
       </button>
@@ -269,7 +278,7 @@ function Game() {
       {eliminated.value.includes(unitLabel) && <p class="banner">Éliminé : vous suivez la suite de la partie.</p>}
       {tiebreak.value && <p class="holder">Mort subite : {tiebreak.value.join(' contre ')}</p>}
       {pick.value &&
-        (unitName(pick.value.picker) === unitLabel ? (
+        (pick.value.chooser === me.value ? (
           <div>
             <p class="holder">Choisissez un thème</p>
             {pick.value.themes.map((th: Data) => (
@@ -279,7 +288,11 @@ function Game() {
             ))}
           </div>
         ) : (
-          <p>{unitName(pick.value.picker)} choisit le thème…</p>
+          <p>
+            {unitName(pick.value.picker) === unitLabel && pick.value.picker.team
+              ? `${pick.value.chooser} choisit le thème pour votre équipe…`
+              : `${chooserName(pick.value)} choisit le thème…`}
+          </p>
         ))}
       {myLimit && !wagered.value && (
         <form

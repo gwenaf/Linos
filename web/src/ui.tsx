@@ -20,6 +20,11 @@ export function unitName(d: Data): string {
   return d.team ?? d.name
 }
 
+/** Who picks a theme: the player, or "Alice (Les Rouges)" for a team's captain. */
+export function chooserName(pick: Data): string {
+  return pick.picker.team && pick.chooser ? `${pick.chooser} (${pick.picker.team})` : unitName(pick.picker)
+}
+
 /** Keeps the latest score of each team or player; key is the display label. */
 export function scoreKey(d: Data): string {
   return d.team ?? d.name

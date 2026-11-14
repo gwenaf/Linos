@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { connect, isLocalPage, onHostMachine, store, type Data } from './ws'
-import { Answers, Banner, Qr, Results, Scores, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Qr, Results, Scores, chooserName, scoreKey, scoreTable, unitName } from './ui'
 
 const MASTER_TOKEN = 'linos-master'
 const invite = new URLSearchParams(location.search).get('invite')
@@ -303,7 +303,10 @@ function Lobby() {
             {lobby.value.players.map((p: Data) => (
               <tr key={p.name}>
                 <td>{p.name}</td>
-                <td>{p.team}</td>
+                <td>
+                  {p.team}
+                  {p.captain && <small title="Choisit les thèmes pour l'équipe"> capitaine</small>}
+                </td>
                 <td>{p.connected ? (p.ready ? 'Prêt' : 'Pas prêt') : 'Déconnecté'}</td>
                 <td>
                   {!p.connected && (
@@ -398,7 +401,7 @@ function Game() {
       {pick.value && (
         <section>
           <p>
-            <strong>{unitName(pick.value.picker)}</strong> choisit un thème parmi : {pick.value.themes.map((th: Data) => th.name).join(', ')}
+            <strong>{chooserName(pick.value)}</strong> choisit un thème parmi : {pick.value.themes.map((th: Data) => th.name).join(', ')}
           </p>
           <button onClick={() => conn.send('skip')}>Passer ce choix</button>
         </section>

@@ -12,6 +12,7 @@ type lobbyUpdate struct {
 		Team      string `json:"team"`
 		Ready     bool   `json:"ready"`
 		Connected bool   `json:"connected"`
+		Captain   bool   `json:"captain"`
 	} `json:"players"`
 	Teams []string `json:"teams"`
 	State string   `json:"state"`

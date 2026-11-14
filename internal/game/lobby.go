@@ -31,6 +31,9 @@ type player struct {
 type team struct {
 	name  string
 	score int
+	// captain picks the theme for the team: the first player to join it, then another member when
+	// the captain leaves.
+	captain *player
 }
 
 // unit is who buzzes, gets excluded and scores: the team when the player has one, else the player.
@@ -112,6 +115,15 @@ func (r *Room) joinTeam(c *Client, m Message) {
 func (r *Room) setTeam(p *player, t *team) {
 	old := p.team
 	p.team = t
+	if t != nil && t.captain == nil {
+		t.captain = p
+	}
+	if old != nil && old != t && old.captain == p {
+		old.captain = nil
+		if members := r.members(old, false); len(members) > 0 {
+			old.captain = members[0]
+		}
+	}
 	if old != nil && old != t && old.score == 0 && !r.hasMembers(old) {
 		r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == old })
 	}
@@ -239,6 +251,7 @@ func (r *Room) lobbyPayload() map[string]any {
 		Team      string `json:"team,omitempty"`
 		Ready     bool   `json:"ready"`
 		Connected bool   `json:"connected"`
+		Captain   bool   `json:"captain,omitempty"`
 	}
 	players := []entry{}
 	for _, p := range r.players {
@@ -247,7 +260,7 @@ func (r *Room) lobbyPayload() map[string]any {
 		}
 		e := entry{Name: p.name, Ready: p.ready, Connected: p.client != nil}
 		if p.team != nil {
-			e.Team = p.team.name
+			e.Team, e.Captain = p.team.name, p.team.captain == p
 		}
 		players = append(players, e)
 	}
@@ -300,6 +313,18 @@ func (r *Room) playerByName(name string) *player {
 		}
 	}
 	return nil
+}
+
+// members lists the named players of a team by name; connected keeps those online.
+func (r *Room) members(t *team, connected bool) []*player {
+	var out []*player
+	for _, p := range r.players {
+		if p.team == t && p.name != "" && (!connected || p.client != nil) {
+			out = append(out, p)
+		}
+	}
+	slices.SortFunc(out, func(a, b *player) int { return strings.Compare(a.name, b.name) })
+	return out
 }
 
 func (r *Room) hasMembers(t *team) bool {

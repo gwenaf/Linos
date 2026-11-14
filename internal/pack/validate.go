@@ -107,7 +107,7 @@ func (p *Pack) validate() error {
 
 	for i, r := range m.Rounds {
 		at := fmt.Sprintf("rounds[%d]", i)
-		v.oneOf(at+".picker", r.Picker, "", "rotation")
+		v.oneOf(at+".picker", r.Picker, "", "rotation", "last", "first", "random")
 		v.oneOf(at+".pickScope", r.PickScope, "", "track", "theme")
 		v.rules(at+".rules", r.Rules)
 		switch r.Selection {

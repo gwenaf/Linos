@@ -48,7 +48,9 @@ func TestThemePick(t *testing.T) {
 	}
 
 	// The picker leaves: the next team picks instead.
+	// (Connections changing during a pick send it again: the rejoin above did.)
 	send(r, ctrl, "kick", obj{"name": "bob"})
+	expect(t, ctrl, "kicked", nil)
 	expect(t, ctrl, "theme-pick-request", &pick)
 	if pick.Picker.Name != "carol" {
 		t.Fatalf("pick after kick = %+v, want carol", pick)
@@ -370,4 +372,87 @@ func TestLastPickerLeaves(t *testing.T) {
 	send(r, ctrl, "kick", obj{"name": "alice"})
 	expect(t, ctrl, "round-end", nil)
 	expect(t, ctrl, "game-end", nil)
+}
+
+// The round's picker rule sets who picks first: the last by score, the first, or a random order.
+func TestPickOrder(t *testing.T) {
+	for picker, want := range map[string]string{"last": "alice", "first": "bob", "random": ""} {
+		m := themedManifest("fr", "fr", "en")
+		m["rounds"] = list{
+			obj{"name": "Échauffement", "selection": "sequence", "tracks": list{"t1"}},
+			obj{"name": "Choix", "selection": "theme-pick", "themes": list{"fr", "en"}, "count": 2, "picker": picker},
+		}
+		r := newRoom(t, m)
+		alice, bob, carol := newPlayer(t, r, "alice"), newPlayer(t, r, "bob"), newPlayer(t, r, "carol")
+		ctrl, host := launch(t, r, obj{"pack": "basic"}, alice, bob, carol)
+		expect(t, host, "track-start", nil)
+		send(r, ctrl, "score-adjust", obj{"name": "bob", "delta": 50})
+		send(r, ctrl, "score-adjust", obj{"name": "carol", "delta": 20})
+		send(r, ctrl, "skip", nil)
+		expect(t, ctrl, "track-end", nil)
+		send(r, ctrl, "skip", nil)
+		var pick struct {
+			Picker  unitMsg `json:"picker"`
+			Chooser string  `json:"chooser"`
+		}
+		expect(t, ctrl, "theme-pick-request", &pick)
+		if (want != "" && pick.Picker.Name != want) || pick.Chooser != pick.Picker.Name {
+			t.Errorf("%s: first pick = %+v, want %q choosing", picker, pick, want)
+		}
+	}
+}
+
+// In a team, only the captain's phone picks; a teammate stands in while the captain is away.
+func TestCaptainPicks(t *testing.T) {
+	m := themedManifest("fr", "en")
+	m["rounds"] = list{obj{"name": "Choix", "selection": "theme-pick", "themes": list{"fr", "en"}, "count": 2}}
+	r := newRoom(t, m)
+	alice, dave, carol := newPlayer(t, r, "alice"), newPlayer(t, r, "dave"), newPlayer(t, r, "zoe")
+	bea := newPlayer(t, r, "bea")
+	send(r, alice, "join-team", obj{"team": "ateam"})
+	send(r, dave, "join-team", obj{"team": "ateam"})
+	send(r, bea, "join-team", obj{"team": "ateam"})
+	// The captain leaving the team hands it on; coming back does not take it back.
+	send(r, alice, "join-team", obj{"team": ""})
+	send(r, alice, "join-team", obj{"team": "ateam"})
+	lobby := awaitLobby(t, carol, func(l lobbyUpdate) bool {
+		return len(l.Players) == 4 && l.Players[0].Team == "ateam" && l.Players[1].Captain
+	})
+	if lobby.Players[0].Captain || !lobby.Players[1].Captain || lobby.Players[2].Captain {
+		t.Fatalf("lobby = %+v, want bea, first remaining by name, captain of ateam", lobby)
+	}
+
+	ctrl, _ := launch(t, r, obj{"pack": "basic"}, alice, bea, dave, carol)
+	var pick struct {
+		Picker  unitMsg `json:"picker"`
+		Chooser string  `json:"chooser"`
+	}
+	expect(t, ctrl, "theme-pick-request", &pick)
+	if pick.Picker.Team != "ateam" || pick.Chooser != "bea" {
+		t.Fatalf("pick = %+v, want bea choosing for ateam", pick)
+	}
+	send(r, alice, "pick-theme", obj{"theme": "fr"})
+	expectError(t, alice, "not-your-pick")
+
+	// The captain drops: alice, first of the members online by name, gets the pick and plays it once
+	// the game resumes.
+	r.Disconnect(bea.Client)
+	expect(t, ctrl, "theme-pick-request", &pick)
+	if pick.Chooser != "alice" {
+		t.Fatalf("pick with the captain away = %+v, want alice", pick)
+	}
+	send(r, ctrl, "resume", nil)
+	expect(t, ctrl, "game-resumed", nil)
+	send(r, alice, "pick-theme", obj{"theme": "fr"})
+	expect(t, ctrl, "theme-picked", nil)
+
+	// Someone joining during the round picks after those already in the order.
+	newPlayer(t, r, "yann")
+	send(r, ctrl, "skip", nil)
+	expect(t, ctrl, "track-end", nil)
+	send(r, ctrl, "skip", nil)
+	expect(t, ctrl, "theme-pick-request", &pick)
+	if pick.Picker.Name != "zoe" {
+		t.Fatalf("second pick = %+v, want zoe, yann coming after her", pick)
+	}
 }

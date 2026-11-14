@@ -107,7 +107,7 @@ func (r *Room) requestPick() bool {
 	if len(r.pickableThemes()) == 0 || len(units) == 0 {
 		return false
 	}
-	r.picker = units[r.picks%len(units)]
+	r.picker = r.pickOrder(units)[r.picks%len(units)]
 	r.picks++
 	r.trackState = trackPicking
 	r.broadcast(NewMessage("theme-pick-request", r.pickPayload()))
@@ -138,8 +138,49 @@ func (r *Room) unplayed(theme string) []*pack.Track {
 	return tracks
 }
 
+// pickOrder orders the units picking a theme, as the round's picker rule says. The order is set at
+// the round's first pick; units no longer playing are skipped and new ones come last.
+func (r *Room) pickOrder(units []any) []any {
+	if r.picks == 0 {
+		r.order = slices.Clone(units)
+		byScore := func(a, b any) int { return cmp.Compare(unitScore(a), unitScore(b)) }
+		switch r.manifest().Rounds[r.playlist[r.current].round].Picker {
+		case "last":
+			slices.SortStableFunc(r.order, byScore)
+		case "first":
+			slices.SortStableFunc(r.order, func(a, b any) int { return byScore(b, a) })
+		case "random":
+			mrand.Shuffle(len(r.order), func(i, j int) { r.order[i], r.order[j] = r.order[j], r.order[i] })
+		}
+	}
+	order := slices.DeleteFunc(slices.Clone(r.order), func(u any) bool { return !slices.Contains(units, u) })
+	for _, u := range units {
+		if !slices.Contains(order, u) {
+			order = append(order, u)
+		}
+	}
+	return order
+}
+
+// chooser is the player whose phone picks for the picking unit: a solo player, or the team's captain,
+// replaced while away by the first connected member.
+func (r *Room) chooser() *player {
+	t, ok := r.picker.(*team)
+	if !ok {
+		return r.picker.(*player)
+	}
+	if online := r.members(t, true); t.captain.client == nil && len(online) > 0 {
+		return online[0]
+	}
+	return t.captain
+}
+
 func (r *Room) pickPayload() map[string]any {
-	return map[string]any{"picker": unitPayload(r.picker), "themes": r.pickableThemes()}
+	d := map[string]any{"picker": unitPayload(r.picker), "themes": r.pickableThemes()}
+	if p := r.chooser(); p != nil {
+		d["chooser"] = p.name
+	}
+	return d
 }
 
 func (r *Room) pickTheme(c *Client, m Message) {
@@ -151,6 +192,10 @@ func (r *Room) pickTheme(c *Client, m Message) {
 	}
 	if r.trackState != trackPicking || unit(c.player) != r.picker {
 		r.sendError(c, "not-your-pick", "another team picks the theme")
+		return
+	}
+	if c.player != r.chooser() {
+		r.sendError(c, "not-your-pick", r.chooser().name+" picks for the team")
 		return
 	}
 	var tracks []*pack.Track

@@ -1267,6 +1267,15 @@ function RoundPanel({ i }: { i: number }) {
           <Ids o={r} path={['themes']} label="Thèmes" options={themeOptions()} />
           <NewTheme round={i} />
           <Num o={r} path={['count']} label={r.selection === 'theme-pick' ? 'Nombre de choix de thème' : 'Nombre de questions tirées'} int />
+          {r.selection === 'theme-pick' && (
+            <Pick
+              o={r}
+              path={['picker']}
+              label="Ordre des choix"
+              options={pickerOptions}
+              base={{ picker: 'rotation' }}
+            />
+          )}
         </>
       )}
       <Num o={r} path={['eliminate']} label="Éliminés en fin de manche" int />
@@ -1282,7 +1291,6 @@ function RoundPanel({ i }: { i: number }) {
         </label>
         {r.selection === 'theme-pick' && (
           <>
-            <Pick o={r} path={['picker']} label="Qui choisit" options={[['rotation', 'chacun son tour']]} />
             <Pick
               o={r}
               path={['pickScope']}
@@ -1299,6 +1307,13 @@ function RoundPanel({ i }: { i: number }) {
     </>
   )
 }
+
+const pickerOptions: [string, string][] = [
+  ['rotation', 'chacun son tour, par ordre alphabétique'],
+  ['last', "le dernier au score d'abord"],
+  ['first', "le premier au score d'abord"],
+  ['random', 'au hasard'],
+]
 
 // roundPool lists the questions a random or theme-pick round draws from: those of its themes.
 function roundPool(r: Data): string[] {

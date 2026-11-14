@@ -95,7 +95,13 @@ export function describe(m: Data, r?: Data): string[] {
   if (r?.selection === 'sequence') out.push(`${plural(r.tracks?.length ?? 0, 'question')}, dans l'ordre.`)
   if (r?.selection === 'random') out.push(`${plural(r.count ?? 0, 'question')} tirées au hasard. Thèmes : ${themes}.`)
   if (r?.selection === 'theme-pick') {
-    out.push(`${plural(r.count ?? 0, 'choix')} de thème, chaque ${who} à son tour. Thèmes : ${themes}.`)
+    const order: Record<string, string> = {
+      last: "le dernier au score d'abord",
+      first: "le premier au score d'abord",
+      random: 'dans un ordre tiré au hasard',
+    }
+    out.push(`${plural(r.count ?? 0, 'choix')} de thème, chaque ${who} à son tour, ${order[r.picker] ?? "par ordre alphabétique"}. Thèmes : ${themes}.`)
+    if (teams && teams !== 'none') out.push("Dans une équipe, c'est le capitaine (le premier à l'avoir rejointe) qui choisit, sur son téléphone.")
     out.push(r.pickScope === 'theme' ? 'Chaque choix enchaîne toutes les questions du thème, dans l’ordre.' : 'Chaque choix joue une question du thème.')
   }
   out.push(`Chaque extrait dure ${rules.duration} s.`)

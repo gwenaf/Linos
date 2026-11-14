@@ -1,7 +1,7 @@
 import { computed, effect, signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { connect, type Data } from './ws'
-import { Answers, Banner, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, whenLoaded, scoreKey, scoreTable, unitName } from './ui'
+import { Answers, Banner, Qr, Results, Scores, Stage, effectsAt, finalEffects, outroVolume, whenLoaded, scoreKey, scoreTable, chooserName, unitName } from './ui'
 
 const conn = connect('host')
 
@@ -154,7 +154,7 @@ export default function Host() {
       {roundEnd.value && <Results data={roundEnd.value} />}
       {pick.value ? (
         <section>
-          <h1>{unitName(pick.value.picker)} choisit un thème</h1>
+          <h1>{chooserName(pick.value)} choisit un thème</h1>
           <ul class="players">
             {pick.value.themes.map((th: Data) => (
               <li key={th.id}>{th.name}</li>
@@ -192,7 +192,7 @@ function LobbyView() {
         {lobby.value.players.map((p: Data) => (
           <li key={p.name} class={p.ready ? 'ready' : ''}>
             {p.name}
-            {p.team && <small> {p.team}</small>}
+            {p.team && <small> {p.team}{p.captain && ', capitaine'}</small>}
           </li>
         ))}
       </ul>

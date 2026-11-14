@@ -102,6 +102,10 @@ func (r *Room) connectionsChanged() {
 		case r.state == stateTechnicalPause:
 			r.resume()
 		}
+		// A captain away hands the pick to a connected teammate, and back on return.
+		if r.trackState == trackPicking {
+			r.broadcast(NewMessage("theme-pick-request", r.pickPayload()))
+		}
 	}
 }
 
