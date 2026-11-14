@@ -23,6 +23,8 @@ type player struct {
 	ready  bool
 	team   *team
 	client *Client
+	// leftAt is when the player lost its connection: see Room.grace.
+	leftAt time.Time
 	// late players first named themselves during a game: their leaving never pauses it, so nobody can
 	// stop a game by joining and closing the page.
 	late bool
@@ -32,8 +34,11 @@ type team struct {
 	name  string
 	score int
 	// captain picks the theme for the team: the first player to join it, then another member when
-	// the captain leaves.
+	// the captain leaves, or whom the gamemaster names.
 	captain *player
+	// fixed teams are created by the gamemaster: they stay when empty, and while one exists players
+	// join the teams offered instead of creating their own.
+	fixed bool
 }
 
 // unit is who buzzes, gets excluded and scores: the team when the player has one, else the player.
@@ -99,6 +104,10 @@ func (r *Room) joinTeam(c *Client, m Message) {
 			return
 		}
 		if t = r.teamByName(name); t == nil {
+			if r.teamsFixed() {
+				r.sendError(c, "teams-fixed", "join one of the teams offered")
+				return
+			}
 			if len(r.teams) >= maxTeams {
 				r.sendError(c, "too-many-teams", "team limit reached")
 				return
@@ -124,7 +133,7 @@ func (r *Room) setTeam(p *player, t *team) {
 			old.captain = members[0]
 		}
 	}
-	if old != nil && old != t && old.score == 0 && !r.hasMembers(old) {
+	if old != nil && old != t && old.score == 0 && !old.fixed && !r.hasMembers(old) {
 		r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == old })
 	}
 }
@@ -269,7 +278,7 @@ func (r *Room) lobbyPayload() map[string]any {
 	for _, t := range r.teams {
 		teams = append(teams, t.name)
 	}
-	return map[string]any{"players": players, "teams": teams, "state": r.state}
+	return map[string]any{"players": players, "teams": teams, "teamsFixed": r.teamsFixed(), "state": r.state}
 }
 
 // validName trims a player or team name and refuses one nobody could read: empty, too long, or made
@@ -295,6 +304,101 @@ func visible(x rune) bool {
 		return false
 	}
 	return unicode.IsGraphic(x) && !unicode.IsSpace(x) && !unicode.Is(unicode.Cf, x)
+}
+
+// teamsFixed reports whether the gamemaster set the teams up.
+func (r *Room) teamsFixed() bool {
+	return slices.ContainsFunc(r.teams, func(t *team) bool { return t.fixed })
+}
+
+// createTeam adds a team set up by the gamemaster.
+func (r *Room) createTeam(c *Client, m Message) {
+	var d struct {
+		Team string `json:"team"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	name, ok := r.validName(c, d.Team)
+	switch {
+	case !ok:
+		return
+	case r.teamByName(name) != nil:
+		r.teamByName(name).fixed = true
+	case len(r.teams) >= maxTeams:
+		r.sendError(c, "too-many-teams", "team limit reached")
+		return
+	default:
+		r.teams = append(r.teams, &team{name: name, fixed: true})
+	}
+	r.broadcastLobby()
+}
+
+// deleteTeam removes a team; its members are left without one.
+func (r *Room) deleteTeam(c *Client, m Message) {
+	var d struct {
+		Team string `json:"team"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	t := r.teamByName(d.Team)
+	if t == nil {
+		r.sendError(c, "unknown-team", "no team named "+d.Team)
+		return
+	}
+	for _, p := range r.members(t, false) {
+		p.team = nil
+	}
+	r.teams = slices.DeleteFunc(r.teams, func(x *team) bool { return x == t })
+	r.broadcastLobby()
+}
+
+// moveToTeam puts a player in a team, or in none, as the gamemaster decides.
+func (r *Room) moveToTeam(c *Client, m Message) {
+	var d struct {
+		Name string `json:"name"`
+		Team string `json:"team"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	p := r.playerByName(d.Name)
+	t := r.teamByName(d.Team)
+	switch {
+	case p == nil:
+		r.sendError(c, "unknown-player", "no player named "+d.Name)
+		return
+	case t == nil && d.Team != "":
+		r.sendError(c, "unknown-team", "no team named "+d.Team)
+		return
+	}
+	r.setTeam(p, t)
+	r.broadcastLobby()
+}
+
+// setCaptain names the player who picks themes for their team.
+func (r *Room) setCaptain(c *Client, m Message) {
+	var d struct {
+		Name string `json:"name"`
+	}
+	if !r.decode(c, m, &d) {
+		return
+	}
+	p := r.playerByName(d.Name)
+	switch {
+	case p == nil:
+		r.sendError(c, "unknown-player", "no player named "+d.Name)
+		return
+	case p.team == nil:
+		r.sendError(c, "no-team", d.Name+" is in no team")
+		return
+	}
+	p.team.captain = p
+	r.broadcastLobby()
+	if r.trackState == trackPicking && slices.Contains(runningStates, r.state) {
+		r.broadcast(NewMessage("theme-pick-request", r.pickPayload()))
+	}
 }
 
 func (r *Room) teamByName(name string) *team {

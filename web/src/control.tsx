@@ -310,16 +310,35 @@ function Lobby() {
           ))}
         </ul>
       </section>
+      <Teams />
       <section>
-        <h2>Joueurs</h2>
+        <h2>Joueurs ({lobby.value.players.length})</h2>
         <table>
           <tbody>
             {lobby.value.players.map((p: Data) => (
               <tr key={p.name}>
                 <td>{p.name}</td>
                 <td>
-                  {p.team}
-                  {p.captain && <small title="Choisit les thèmes pour l'équipe"> capitaine</small>}
+                  {lobby.value.teams.length > 0 ? (
+                    <select value={p.team ?? ''} onChange={(e) => conn.send('move-player', { name: p.name, team: (e.target as HTMLSelectElement).value })}>
+                      <option value="">sans équipe</option>
+                      {lobby.value.teams.map((t: string) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    p.team
+                  )}{' '}
+                  {p.team &&
+                    (p.captain ? (
+                      <small title="Choisit les thèmes pour l'équipe">capitaine</small>
+                    ) : (
+                      <button class="link" onClick={() => conn.send('set-captain', { name: p.name })}>
+                        nommer capitaine
+                      </button>
+                    ))}
                 </td>
                 <td>{p.connected ? (p.ready ? 'Prêt' : 'Pas prêt') : 'Déconnecté'}</td>
                 <td>
@@ -339,6 +358,44 @@ function Lobby() {
         {configured.value && state.value !== 'ready' && <small>Tous les joueurs connectés doivent être prêts.</small>}
       </section>
     </>
+  )
+}
+
+// Teams lets the gamemaster set the teams up before players join: once one is created, players pick
+// among them instead of typing their own.
+function Teams() {
+  const create = (e: Event) => {
+    e.preventDefault()
+    const input = (e.target as HTMLFormElement).elements.namedItem('team') as HTMLInputElement
+    if (input.value.trim()) conn.send('create-team', { team: input.value.trim() })
+    input.value = ''
+  }
+  return (
+    <section>
+      <h2>Équipes</h2>
+      {lobby.value.teams.length > 0 && (
+        <ul class="teams">
+          {lobby.value.teams.map((t: string) => (
+            <li key={t}>
+              {t} <small>({lobby.value.players.filter((p: Data) => p.team === t).length})</small>{' '}
+              <button title="Supprimer l'équipe : ses joueurs restent, sans équipe" onClick={() => confirm(`Supprimer l'équipe « ${t} » ?`) && conn.send('delete-team', { team: t })}>
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={create}>
+        <input name="team" placeholder="Nom de l'équipe" maxLength={32} /> <button>Créer l'équipe</button>
+      </form>
+      <p>
+        <small>
+          {lobby.value.teamsFixed
+            ? 'Les joueurs choisissent parmi ces équipes. Changez un joueur d’équipe ou de capitaine dans la liste ci-dessous.'
+            : 'Sans équipe créée ici, chaque joueur tape le nom de la sienne. En créer une impose la liste.'}
+        </small>
+      </p>
+    </section>
   )
 }
 

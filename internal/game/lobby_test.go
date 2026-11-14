@@ -256,3 +256,62 @@ func TestLateJoinerLeavingDoesNotPause(t *testing.T) {
 		t.Fatalf("paused = %+v, want mallory missing once she played from the start", paused)
 	}
 }
+
+// The gamemaster sets the teams up: created teams stay when empty and are the only ones players may
+// join; players are moved, captains named, teams deleted.
+func TestTeamsByGamemaster(t *testing.T) {
+	r := newRoom(t, nil)
+	ctrl := newControl(t, r)
+	alice := newPlayer(t, r, "alice")
+	newPlayer(t, r, "bob")
+
+	send(r, ctrl, "create-team", obj{"team": "Rouges"})
+	send(r, ctrl, "create-team", obj{"team": "Bleus"})
+	send(r, ctrl, "create-team", obj{"team": "rouges"}) // already there
+	awaitLobby(t, ctrl, teamsAre("Rouges", "Bleus"))
+	send(r, alice, "join-team", obj{"team": "Verts"})
+	expectError(t, alice, "teams-fixed")
+	send(r, alice, "join-team", obj{"team": "rouges"})
+	send(r, ctrl, "move-player", obj{"name": "bob", "team": "Rouges"})
+	send(r, ctrl, "set-captain", obj{"name": "bob"})
+	l := awaitLobby(t, ctrl, func(l lobbyUpdate) bool { return len(l.Players) == 2 && l.Players[1].Captain })
+	if l.Players[0].Team != "Rouges" || l.Players[0].Captain {
+		t.Fatalf("lobby = %+v, want both in Rouges, bob captain", l)
+	}
+	// Leaving a created team keeps it, even empty.
+	send(r, ctrl, "move-player", obj{"name": "alice", "team": ""})
+	send(r, ctrl, "move-player", obj{"name": "bob", "team": "Bleus"})
+	awaitLobby(t, ctrl, func(l lobbyUpdate) bool { return l.Players[1].Team == "Bleus" && len(l.Teams) == 2 })
+
+	for _, bad := range []struct {
+		typ  string
+		data obj
+		code string
+	}{
+		{"create-team", obj{"team": " "}, "invalid-name"},
+		{"create-team", obj{"team": 1}, "bad-data"},
+		{"delete-team", obj{"team": "Jaunes"}, "unknown-team"},
+		{"delete-team", obj{"team": 1}, "bad-data"},
+		{"move-player", obj{"name": "zed", "team": "Bleus"}, "unknown-player"},
+		{"move-player", obj{"name": "bob", "team": "Jaunes"}, "unknown-team"},
+		{"move-player", obj{"name": 1}, "bad-data"},
+		{"set-captain", obj{"name": "zed"}, "unknown-player"},
+		{"set-captain", obj{"name": "alice"}, "no-team"},
+		{"set-captain", obj{"name": 1}, "bad-data"},
+	} {
+		send(r, ctrl, bad.typ, bad.data)
+		expectError(t, ctrl, bad.code)
+	}
+
+	// Deleting a team leaves its members without one; with no created team left, players create theirs.
+	send(r, ctrl, "delete-team", obj{"team": "Bleus"})
+	send(r, ctrl, "delete-team", obj{"team": "Rouges"})
+	awaitLobby(t, ctrl, func(l lobbyUpdate) bool { return len(l.Teams) == 0 && l.Players[1].Team == "" })
+	send(r, alice, "join-team", obj{"team": "Verts"})
+	awaitLobby(t, ctrl, teamsAre("Verts"))
+	for i := range maxTeams - 1 {
+		send(r, ctrl, "create-team", obj{"team": fmt.Sprintf("t%d", i)})
+	}
+	send(r, ctrl, "create-team", obj{"team": "one too many"})
+	expectError(t, ctrl, "too-many-teams")
+}

@@ -1,4 +1,4 @@
-import { signal } from '@preact/signals'
+import { effect, signal } from '@preact/signals'
 import { connect, store, type Data } from './ws'
 import { Answers, Banner, Results, chooserName, scoreKey, scoreTable, unitName } from './ui'
 
@@ -98,8 +98,33 @@ conn.on('lobby-update', (d) => {
     pendingName.value = ''
   }
 })
+// During a game the screen stays on: a locked phone loses its connection. Browsers allow it on HTTPS
+// (and localhost) only; on a plain-HTTP local network the server's grace covers short locks.
+let wakeLock: WakeLockSentinel | null = null
+async function keepAwake() {
+  if (state.value !== 'in-progress' || wakeLock || document.hidden || !navigator.wakeLock) return
+  try {
+    wakeLock = await navigator.wakeLock.request('screen')
+    wakeLock.addEventListener('release', () => (wakeLock = null))
+  } catch {
+    // refused (battery saver, no user gesture yet): the grace still applies
+  }
+}
+effect(() => {
+  if (state.value === 'in-progress') keepAwake()
+  else wakeLock?.release()
+})
+document.addEventListener('visibilitychange', keepAwake)
+
 conn.on('error', (d) => {
   pendingName.value = ''
+  // Teammates answering at the same time: not an error for them.
+  // or answering just as the track ends.
+  if (d.code === 'wrong-state' && ended.value) conn.error.value = ''
+  if (d.code === 'team-answered') {
+    conn.error.value = ''
+    feedback.value = 'Votre équipe a déjà répondu.'
+  }
   // Stale invite: join with the stored token instead; conn.error tells why.
   if (d.code === 'invalid-invite') {
     invite = null
@@ -144,6 +169,11 @@ conn.on('answer-result', (d) => {
   const simultaneous = track.value?.mode === 'simultaneous'
   // A gamemaster may validate several guesses at once.
   if (d.correct || (simultaneous && d.final)) done.value = [...done.value, ...(d.guesses?.length ? d.guesses : [d.guess])]
+  const myTeam = lobby.value.players.find((p: Data) => p.name === me.value)?.team
+  if (d.name !== me.value && simultaneous && myTeam && d.team === myTeam) {
+    feedback.value = `${d.name} a répondu pour l'équipe : ${d.correct ? `bon ! +${d.points}` : 'raté'}`
+    return
+  }
   if (d.name !== me.value) return
   if (d.correct) feedback.value = `Bravo ! +${d.points}`
   else feedback.value = d.remaining > 0 ? `Raté… encore ${d.remaining} essai(s)` : 'Raté…'
@@ -228,15 +258,21 @@ function Lobby() {
     <>
       {results.value && <Results data={results.value} />}
       <h1>{me.value}</h1>
-      <form onSubmit={joinTeam} class="team">
-        <input name="team" list="teams" placeholder="Équipe (facultatif)" maxLength={32} value={mine?.team ?? ''} />
-        <datalist id="teams">
+      {lobby.value.teams.length > 0 && (
+        <div class="team-choice">
           {lobby.value.teams.map((t: string) => (
-            <option key={t} value={t} />
+            <button key={t} class={mine?.team === t ? 'selected' : ''} onClick={() => conn.send('join-team', { team: t })}>
+              {t}
+            </button>
           ))}
-        </datalist>
-        <button>Valider l'équipe</button>
-      </form>
+        </div>
+      )}
+      {!lobby.value.teamsFixed && (
+        <form onSubmit={joinTeam} class="team">
+          <input name="team" placeholder={lobby.value.teams.length ? 'Ou une nouvelle équipe' : 'Équipe (facultatif)'} maxLength={32} />
+          <button>Valider l'équipe</button>
+        </form>
+      )}
       {mine?.team && (
         <p>
           <small>
@@ -250,7 +286,7 @@ function Lobby() {
         {mine?.ready ? 'Prêt ! (annuler)' : 'Je suis prêt'}
       </button>
       <p>
-        {lobby.value.players.filter((p: Data) => p.ready).length} / {lobby.value.players.length} joueurs prêts
+        {lobby.value.players.filter((p: Data) => p.connected && p.ready).length} / {lobby.value.players.filter((p: Data) => p.connected).length} joueurs prêts
       </p>
     </>
   )

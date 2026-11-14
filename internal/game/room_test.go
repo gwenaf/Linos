@@ -56,7 +56,9 @@ func newRoom(t *testing.T, manifest obj) *Room {
 	}
 	dir := t.TempDir()
 	writePack(t, dir, "basic", manifest)
-	return NewRoom(dir)
+	r := NewRoom(dir)
+	r.grace = 0 // tests pause at once, as before the grace; TestGrace covers it
+	return r
 }
 
 type testClient struct {

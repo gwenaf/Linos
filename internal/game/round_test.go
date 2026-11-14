@@ -433,6 +433,14 @@ func TestCaptainPicks(t *testing.T) {
 	}
 	send(r, alice, "pick-theme", obj{"theme": "fr"})
 	expectError(t, alice, "not-your-pick")
+	// The gamemaster names alice captain during the pick: her phone gets it.
+	send(r, ctrl, "set-captain", obj{"name": "alice"})
+	expect(t, ctrl, "theme-pick-request", &pick)
+	if pick.Chooser != "alice" {
+		t.Fatalf("pick after naming alice captain = %+v", pick)
+	}
+	send(r, ctrl, "set-captain", obj{"name": "bea"})
+	expect(t, ctrl, "theme-pick-request", &pick)
 
 	// The captain drops: alice, first of the members online by name, gets the pick and plays it once
 	// the game resumes.

@@ -3,6 +3,7 @@ package game
 import (
 	"log/slog"
 	"slices"
+	"time"
 )
 
 const (
@@ -92,6 +93,7 @@ func (r *Room) connectionsChanged() {
 		r.broadcastLobby()
 	case stateInProgress, stateTechnicalPause:
 		host, players := r.missing()
+		r.armGrace()
 		switch {
 		case host || len(players) > 0:
 			slog.Warn("technical pause", "hostMissing", host, "missingPlayers", players)
@@ -109,10 +111,19 @@ func (r *Room) connectionsChanged() {
 	}
 }
 
+// armGrace checks the connections again once the players just gone have used up their grace.
+func (r *Room) armGrace() {
+	for _, p := range r.players {
+		if p.name != "" && p.client == nil && time.Since(p.leftAt) < r.grace {
+			time.AfterFunc(r.grace-time.Since(p.leftAt), func() { r.events <- event{kind: evGraceOver} })
+		}
+	}
+}
+
 func (r *Room) missing() (host bool, players []string) {
 	players = []string{}
 	for _, p := range r.players {
-		if p.name != "" && p.client == nil && !r.tolerated[p] && !p.late {
+		if p.name != "" && p.client == nil && !r.tolerated[p] && !p.late && (r.state == stateTechnicalPause || time.Since(p.leftAt) >= r.grace) {
 			players = append(players, p.name)
 		}
 	}

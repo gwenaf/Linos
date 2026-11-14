@@ -188,15 +188,39 @@ function LobbyView() {
       <h1>{title.value || 'Linos'}</h1>
       {results.value && <Results data={results.value} />}
       {joinUrl.value && <Qr url={joinUrl.value} caption="Scannez pour jouer" />}
-      <ul class="players">
-        {lobby.value.players.map((p: Data) => (
-          <li key={p.name} class={p.ready ? 'ready' : ''}>
-            {p.name}
-            {p.team && <small> {p.team}{p.captain && ', capitaine'}</small>}
-          </li>
-        ))}
-      </ul>
+      <p>{lobby.value.players.length} joueurs</p>
+      {lobby.value.teams.length > 0 ? (
+        <div class="team-columns">
+          {[...lobby.value.teams, ''].map((team: string) => {
+            const members = lobby.value.players.filter((p: Data) => (p.team ?? '') === team)
+            if (team === '' && members.length === 0) return null
+            return (
+              <section key={team}>
+                <h2>
+                  {team || 'Sans équipe'} <small>({members.length})</small>
+                </h2>
+                <Players players={members} />
+              </section>
+            )
+          })}
+        </div>
+      ) : (
+        <Players players={lobby.value.players} />
+      )}
     </>
+  )
+}
+
+function Players({ players }: { players: Data[] }) {
+  return (
+    <ul class="players">
+      {players.map((p: Data) => (
+        <li key={p.name} class={p.ready ? 'ready' : ''}>
+          {p.name}
+          {p.captain && <small> capitaine</small>}
+        </li>
+      ))}
+    </ul>
   )
 }
 

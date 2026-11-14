@@ -645,3 +645,45 @@ small.inline {
 .edit .card.selected small {
   color: var(--bg);
 }
+
+/* Lobby on the TV: one column per team, so 45 names stay readable. */
+.team-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+}
+
+.team-columns section {
+  margin: 0;
+}
+
+.team-columns .players li {
+  padding: 0.2rem 0.6rem;
+}
+
+/* Teams offered on the phone, and the gamemaster's team list. */
+.team-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.teams {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.teams li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  padding: 0.1rem 0.2rem 0.1rem 0.6rem;
+}
+
+.teams li small {
+  display: inline;
+}

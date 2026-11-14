@@ -77,7 +77,12 @@ func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) 
 		return
 	}
 	g := r.unansweredGuess(u, label)
-	if g == nil {
+	switch {
+	// The team answered already, often a teammate first: in a team of nine, phones send at once.
+	case g == nil && p.team != nil && r.answeredBy(u, label):
+		r.sendError(c, "team-answered", "your team already answered "+label)
+		return
+	case g == nil:
 		r.sendError(c, "unknown-guess", "no guess left to answer named "+label)
 		return
 	}
@@ -148,6 +153,16 @@ func (r *Room) unansweredGuess(u any, label string) *pack.Guess {
 		}
 	}
 	return nil
+}
+
+// answeredBy reports whether unit u answered the guess named label, or any guess when label is empty.
+func (r *Room) answeredBy(u any, label string) bool {
+	for l, by := range r.answered {
+		if (label == "" || l == label) && by[u] {
+			return true
+		}
+	}
+	return false
 }
 
 // allAnswered reports whether every connected team or player in play has answered every guess.

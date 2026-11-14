@@ -1,8 +1,10 @@
 package game
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 type gamePaused struct {
@@ -147,5 +149,31 @@ func TestTechnicalPausePlayer(t *testing.T) {
 	expect(t, ctrl, "game-paused", &paused)
 	if !reflect.DeepEqual(paused.MissingPlayers, []string{"bob"}) {
 		t.Fatalf("paused = %+v, want bob missing again after reconnecting", paused)
+	}
+}
+
+// A player away less than the grace does not pause the game; longer, it does. The TV pauses at once.
+func TestGrace(t *testing.T) {
+	r := newRoom(t, nil)
+	r.grace = 150 * time.Millisecond
+	alice, token := newPlayerWithToken(t, r, "alice")
+	bob := newPlayer(t, r, "bob")
+	ctrl, _ := startGame(t, r, alice, bob)
+
+	// A phone locking for a moment: back before the grace, nothing happens.
+	r.Disconnect(alice.Client)
+	expectNo(t, r, ctrl, "game-paused")
+	alice = join(r, RolePlayer, map[string]string{"token": token})
+	expect(t, alice, "welcome", nil)
+	time.Sleep(200 * time.Millisecond)
+	expectNo(t, r, ctrl, "game-paused")
+
+	// Away for good: the game pauses once the grace is over.
+	r.Disconnect(bob.Client)
+	expectNo(t, r, ctrl, "game-paused")
+	var paused gamePaused
+	expect(t, ctrl, "game-paused", &paused)
+	if fmt.Sprint(paused.MissingPlayers) != "[bob]" {
+		t.Fatalf("paused = %+v, want bob missing", paused)
 	}
 }

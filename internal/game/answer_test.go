@@ -142,7 +142,11 @@ func TestSimultaneousAnswers(t *testing.T) {
 	answer(bob, "Titre", "Take On Me", submitted{Guess: "Titre", Correct: true, Points: 5})
 	answer(carol, "Titre", "take on me", submitted{Guess: "Titre", Correct: true, Points: 0})
 	send(r, alice, "answer", obj{"guess": "Titre", "value": "again"})
-	expectError(t, alice, "unknown-guess")
+	expectError(t, alice, "team-answered") // her team (herself) answered already
+	send(r, alice, "answer", obj{"guess": "Inconnu", "value": "x"})
+	expectError(t, alice, "unknown-guess") // no such guess, team or not
+	send(r, bob, "answer", obj{"guess": "Titre", "value": "again"})
+	expectError(t, bob, "unknown-guess") // alone, nothing left to answer
 
 	// Other players learn that alice answered, never whether she was right.
 	var ans struct{ Name, Guess string }

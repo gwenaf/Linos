@@ -51,6 +51,7 @@ const (
 	evTrackTimer
 	evHeadStart
 	evLockout
+	evGraceOver
 )
 
 type event struct {
@@ -73,6 +74,9 @@ type Room struct {
 	masters   map[string]bool
 	invites   map[string]invite
 	inviteTTL time.Duration
+	// grace is how long a player may be away, a phone locking or switching networks, before a running
+	// game pauses for them. The host screen pauses it at once.
+	grace time.Duration
 	// tolerated players may stay disconnected without pausing the game, until they reconnect.
 	tolerated map[*player]bool
 
@@ -147,6 +151,7 @@ func NewRoom(packsDir string) *Room {
 		masters:   map[string]bool{},
 		invites:   map[string]invite{},
 		inviteTTL: 2 * time.Minute,
+		grace:     15 * time.Second,
 		tolerated: map[*player]bool{},
 		packsDir:  packsDir,
 	}
@@ -154,8 +159,12 @@ func NewRoom(packsDir string) *Room {
 	return r
 }
 
+// sendBuffer is how many messages may wait for a slow client before it is dropped: room for every
+// lobby update of a full room joining at once.
+const sendBuffer = 1024
+
 func (r *Room) Connect(role string) *Client {
-	return &Client{role: role, send: make(chan Message, 64)}
+	return &Client{role: role, send: make(chan Message, sendBuffer)}
 }
 
 func (r *Room) Receive(c *Client, m Message) {
@@ -186,6 +195,8 @@ func (r *Room) run() {
 			r.trackTimer(e.turn)
 		case evHeadStart:
 			r.headStartTimer(e.turn)
+		case evGraceOver:
+			r.connectionsChanged()
 		case evLockout:
 			r.lockoutTimer(e.turn, e.unit)
 		}
@@ -220,6 +231,10 @@ var commands = map[string]struct {
 	"skip":             {RoleControl, []string{stateInProgress}},
 	"score-adjust":     {RoleControl, nil},
 	"kick":             {RoleControl, nil},
+	"create-team":      {RoleControl, lobbyStates},
+	"delete-team":      {RoleControl, lobbyStates},
+	"move-player":      {RoleControl, lobbyStates},
+	"set-captain":      {RoleControl, nil},
 	"master-invite":    {RoleControl, nil},
 	"reconnect-invite": {RoleControl, nil},
 	"end-game":         {RoleControl, runningStates},
@@ -291,6 +306,14 @@ func (r *Room) handle(e event) {
 		r.scoreAdjust(c, e.msg)
 	case "kick":
 		r.kick(c, e.msg)
+	case "create-team":
+		r.createTeam(c, e.msg)
+	case "delete-team":
+		r.deleteTeam(c, e.msg)
+	case "move-player":
+		r.moveToTeam(c, e.msg)
+	case "set-captain":
+		r.setCaptain(c, e.msg)
 	case "master-invite":
 		r.createInvite(c, "master-invite", nil)
 	case "reconnect-invite":
@@ -407,6 +430,7 @@ func (r *Room) drop(c *Client) {
 func (r *Room) detach(c *Client) {
 	if c.player != nil && c.player.client == c {
 		c.player.client = nil
+		c.player.leftAt = time.Now()
 	}
 	c.player = nil
 }
