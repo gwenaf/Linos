@@ -40,9 +40,9 @@ Seule la génération de l'URL du QR code change entre les deux. Tous les joueur
 
 - Le jeu lit uniquement des fichiers locaux, regroupés dans un **gamepack** `.linospack` (archive ZIP) : un `manifest.json` et les médias (audio, vidéo, image), rangés dans le dossier `packs/` à côté de l'exécutable. Un dossier non zippé au même contenu est aussi accepté (forme d'édition). Exemple de manifest : `docs/manifest.example.json`
 - Un gamepack décrit des pistes, des thèmes et des manches (thèmes et manches facultatifs), ainsi que les règles par défaut
-- Import rapide par glisser-déposer d'un dossier de fichiers audio dans `/control` : pack généré dans `packs/` depuis les tags, jouable aussitôt
+- Import rapide par glisser-déposer d'un dossier de fichiers audio dans `/edit` : pack généré dans `packs/` depuis les tags, ouvert dans l'éditeur
 - Aucune plateforme de streaming dans le jeu : leurs conditions interdisent l'usage en jeu ou quiz (Spotify, Apple, SoundCloud)
-- Création de gamepacks : éditeur `/edit` intégré (PC hôte uniquement, désactivable par `LINOS_EDIT=off`). Manches, thèmes, règles, minutage, image fixe, effets visuels (flou, pixelisation…) appliqués en direct à la lecture
+- Création de gamepacks : éditeur `/edit` intégré (PC hôte ou administrateur d'un serveur, désactivable par `LINOS_EDIT=off`). On y dépose ses musiques pour obtenir un pack, ou un `.linospack` reçu ; un pack exporté se télécharge pour être partagé. Un assistant guide la création (joueurs, arbitre, manches) ; les manches partent de types prêts à l'emploi, avec un résumé en clair de leurs règles ; les questions se glissent entre manches et thèmes. Manches, thèmes, règles, minutage, image fixe, effets visuels (flou, pixelisation…) appliqués en direct à la lecture
 - Export : ffmpeg (facultatif, trouvé dans le PATH) découpe les médias aux segments utilisés pour réduire le `.linospack`
 
 ## Jeu
@@ -58,7 +58,7 @@ Seule la génération de l'URL du QR code change entre les deux. Tous les joueur
 
 - Cross-compilation Windows / macOS / Linux via GitHub Actions
 - Signature SignPath (gratuite en open-source) pour éviter SmartScreen
-- Manifestes `winget` et `scoop`, image Docker pour auto-hébergement
+- Homebrew (macOS, Linux) et Scoop (Windows) depuis ce dépôt, `winget` plus tard ; image Docker pour auto-hébergement (accès administrateur par jeton)
 - Licence AGPL-3.0
 
 ## Point de départ

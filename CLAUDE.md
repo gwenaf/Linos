@@ -40,7 +40,7 @@ Ordre de dev : serveur + protocole WebSocket d'abord, tout le reste se branche d
 - Code simple : pas d'abstraction sans deuxième implémentation réelle.
 - Médias : fichiers locaux uniquement, aucune plateforme de streaming (voir `docs/ARCHITECTURE.md`).
 - Go : `gofmt`, `go vet` propres. Erreurs retournées, pas de `panic` hors `main`.
-- Tests Go : couverture 100 % visée (seule `main()` est exclue). Logique de jeu testée sans réseau via `Room.Connect`/`Receive`.
+- Tests Go : couverture 100 % exigée par `scripts/coverage.sh` (pre-commit, pull requests, release). Exclus : `main()` des commandes, les fichiers générés (première ligne `// Code generated <outil>. DO NOT EDIT.`) et une fonction dont le commentaire de doc finit par `//coverage:ignore <raison>` (exception justifiée, relue en revue). Logique de jeu testée sans réseau via `Room.Connect`/`Receive`.
 - Code, identifiants et commentaires en anglais ; docs et specs en français.
 - Commits : Conventional Commits (`feat:`, `fix:`, `chore:`…).
 - Licence AGPL-3.0.
@@ -50,7 +50,8 @@ Ordre de dev : serveur + protocole WebSocket d'abord, tout le reste se branche d
 ```sh
 git config core.hooksPath .githooks   # une fois après clone : active le pre-commit
 go vet ./...
-go test -cover ./...
+sh scripts/coverage.sh                            # tests + couverture 100 % exigée
+sh scripts/mutation.sh ./internal/game            # test de mutation (gremlins), à la demande : plusieurs minutes par paquet
 cd web && npm install && npm run build && cd ..   # front, à rebuilder avant go build
 CGO_ENABLED=0 go build -o bin/linos ./cmd/linos   # packs à placer dans bin/packs/
 cd web && npm run e2e && cd ..                    # test de fumée navigateur (Chrome ou Edge, CHROME_PATH sinon)
@@ -63,6 +64,8 @@ Variables d'environnement :
 - `LINOS_LOG_LEVEL` : `debug` pour tracer chaque requête et message WebSocket (défaut : info).
 - `LINOS_WEB_DIR` : servir le front depuis le disque (`web/dist`), avec `npm run dev` dans `web/` qui rebuild à chaque modification.
 - `LINOS_ADDR` : adresse d'écoute (défaut `:7777`).
-- `LINOS_EDIT` : `off` désactive l'éditeur `/edit` (serveur auto-hébergé).
+- `LINOS_EDIT` : `off` désactive l'éditeur `/edit`.
+- `LINOS_ADMIN_TOKEN` : jeton (32 caractères min.) qui, saisi sur `/login`, donne les droits du PC hôte sur un serveur auto-hébergé. Désactive l'ouverture du navigateur.
+- `LINOS_BROWSER` : `off` n'ouvre pas le navigateur au démarrage (tests, développement).
 
-Le hook `pre-commit` vérifie `gofmt` + `go vet` sur les `.go` stagés, et lance `npm run lint` / `typecheck` dans `web/` si ces scripts existent.
+Le hook `pre-commit` vérifie `gofmt`, `go vet` et la couverture quand des `.go` sont stagés, et lance `npm run lint` / `typecheck` dans `web/` si ces scripts existent.

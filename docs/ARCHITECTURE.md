@@ -63,12 +63,21 @@ Exemples :
   - `version` plus récente que celle supportée : pack refusé avec un message explicite ;
   - valeurs énumérées (modes, types, sélections) et bornes (`min` ≤ `max`, `fuzziness` entre 0 et 1) contrôlées ;
   - toutes les erreurs sont renvoyées en une fois, préfixées par leur chemin (`tracks[2].guesses[0].answer`).
-- Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée. Pas de signature de pack.
-- Import rapide (`/control`, PC hôte) : glisser-déposer d'un dossier ou de fichiers audio (mp3, m4a, aac, ogg, opus, flac, wav), envoyés à `POST /api/import` (PC hôte, même origine) et enregistrés dans un nouveau pack dossier `packs/import-<date>/`. Le `manifest.json` est généré depuis les tags (`dhowden/tag`) ou, à défaut, le nom « Artiste - Titre » (numéro de piste retiré) : éléments « Artiste » et « Titre », réponses acceptées avec et sans les extras (« (Remastered) », « feat. »). Options : début et durée des extraits, réponses sur téléphone en contrôle `auto`. Le pack importé reste réutilisable et modifiable ; un import sans fichier audio ne laisse rien.
+- Intégrité : le CRC32 du ZIP est vérifié pour `manifest.json` (lu via `archive/zip`), pas pour les médias lus en place. Un média corrompu joue mal mais ne peut pas lire hors de son entrée.
+- Un pack reçu n'est que des données, d'où l'absence de signature : sans autorité de confiance, une signature prouverait seulement « même auteur que la dernière fois », pas « inoffensif ». La sécurité repose sur l'inertie du pack :
+  - seules les extensions de médias lisibles nativement (audio, vidéo, image : `pack.IsMedia`) sont acceptées dans le manifest, servies et extraites ; jamais de `.html`, `.svg` ou programme, qui s'exécuteraient avec les droits du PC hôte ;
+  - les médias sont servis avec `X-Content-Type-Options: nosniff` et `Content-Security-Policy: sandbox` ;
+  - `manifest.json` est limité à 1 Mo, y compris compressé (bombe ZIP) ; `Unpack` n'extrait que le manifest et les médias stockés sans compression ;
+  - l'export restreint ffmpeg aux démultiplexeurs de médias (`-format_whitelist`) et au protocole `file` : une playlist HLS déguisée en `.mp3` ne peut pas recopier d'autres fichiers locaux dans l'archive partagée.
+- Import rapide (accueil de `/edit`) : glisser-déposer d'un dossier ou de fichiers audio (mp3, m4a, aac, ogg, opus, flac, wav), envoyés à `POST /api/import` (droits du PC hôte, même origine) et enregistrés dans un nouveau pack dossier `packs/import-<date>/`. Le `manifest.json` est généré depuis les tags (`dhowden/tag`) ou, à défaut, le nom « Artiste - Titre » (numéro de piste retiré) : éléments « Artiste » et « Titre », réponses acceptées avec et sans les extras (« (Remastered) », « feat. »). Options : début et durée des extraits (le mode de réponse se règle ensuite dans l'éditeur). Le pack importé reste réutilisable et modifiable ; un import sans fichier audio ne laisse rien.
 - `duration` d'une piste prime sur la durée des règles.
+- Révélation : après la fin d'une piste, l'écran hôte joue `outro` secondes de la suite du média, en fondu. Avec `outroMedia`, il joue à la place ce fichier depuis `outroStart`, à vitesse normale : la basse seule en question, le morceau entier en réponse. L'export coupe alors la question à sa seule durée et `outroMedia` à son passage.
+- Le jeu ne sert que les fichiers du manifest (`Manifest.Files` : couverture, médias, fichiers d'outro, photos des effets).
 - Déroulé : à `start-game`, les manches sont aplaties en liste de pistes (`sequence` dans l'ordre, `random` tiré parmi les thèmes sans rejouer une piste). Règles effectives d'une piste : valeurs par défaut, puis règles du pack, puis de la manche, puis barème de l'élément deviné.
 - Avant chaque piste, le serveur enchaîne : choix du thème (manches `theme-pick`, pistes tirées au moment du choix), puis mises (barème `wager`), puis la piste. `skip` abandonne ces étapes.
-- Un seul calcul de points pour le buzz et les réponses simultanées : barème (rapidité, fixe, rang, mise), bonus `othersBonus` pour une autre équipe que le propriétaire du thème, puis joker double sur les points positifs.
+- Un seul calcul de points pour le buzz et les réponses simultanées : barème (rapidité, fixe, rang, mise) ; pour une autre équipe que le propriétaire du thème, × `othersMultiplier` puis + `othersBonus`, et le propriétaire perd `stolenPenalty` (+ ces points avec `stolenLosesPoints`) ; bonus de rebond ; puis joker double sur les points positifs.
+- Le maître du jeu valide en une fois tous les éléments trouvés par le joueur qui a la main. Une réponse incomplète est fausse (`answer.partial` `all`) ou payée élément par élément, moins `answer.incompletePenalty` (`each`, défaut).
+- Manche `theme-pick` : `pickScope` `track` tire une piste du thème choisi, `theme` insère toutes ses pistes non jouées dans la liste de lecture, chacune appartenant au choisisseur.
 - Fin de manche : `round-end`, puis éliminations (`eliminate`). Fin de partie : pistes épuisées (avec mort subite éventuelle), score cible atteint à la fin d'une piste, ou dernière équipe restante.
 - Toutes les règles du manifest sont jouées ; seules les combinaisons impossibles sont refusées au `configure` (voir `PROTOCOL.md`). Le manifest d'exemple est jouable (vérifié par un test).
 - Essais en mode buzz, par élément à deviner : `attempts` par équipe, `rebound` (`none` termine la piste, `others` donne la priorité aux autres, `all` laisse tout le monde rebuzzer), `wrongLockout` (blocage en temps de piste joué), `reboundBonus` pour une bonne réponse après une erreur. Tout est remis à zéro quand un élément est trouvé. En réponses simultanées, `attempts` et `wrongLockout` s'appliquent par équipe et par élément.
@@ -141,9 +150,21 @@ v1 :
 
 macOS affiche une demande similaire, répétée à chaque version pour une application non signée. Linux n'a généralement pas de pare-feu actif par défaut.
 
-### Docker
+### Serveur auto-hébergé (Docker, VPS)
 
-Image `ghcr.io/gwenaf/linos:<version>` (publiée à chaque release, `Dockerfile` à la racine) destinée aux utilisateurs avancés qui installent Linos sur leur serveur : `docker run -d --network host -v linos:/data ghcr.io/gwenaf/linos:<version>`, packs dans `packs/` du volume, éditeur désactivé. Le conteneur doit tourner en réseau `host` (`--network host`) : sans cela, il ne voit pas l'IP du réseau local (QR code faux) et l'annonce mDNS ne sort pas. Le pare-feu relève alors de l'administrateur du serveur. `/control` et `/host` n'étant accordés qu'en bouclage, le pilotage à distance passe par l'invitation maître du jeu ; `/host` reste local au serveur.
+Image `ghcr.io/gwenaf/linos:<version>` (publiée à chaque release, `Dockerfile` à la racine) : `scratch`, sans shell, utilisateur non privilégié (UID 65534), packs dans `packs/` du volume `/data`.
+
+Linos ne doit pas devenir un point d'entrée sur le serveur ; le reste (HTTPS, pare-feu, mises à jour) relève de son administrateur.
+
+- Sans `LINOS_ADMIN_TOKEN`, seules les pages joueurs répondent depuis une autre machine : `/control`, `/host`, `/edit`, `/media` et `/api/*` exigent l'adresse de bouclage.
+- `LINOS_ADMIN_TOKEN` (32 caractères au moins, sinon refus de démarrer ; par exemple `openssl rand -base64 32`) : le navigateur qui saisit ce jeton sur `/login` reçoit un cookie `HttpOnly`, `SameSite=Strict` (`Secure` derrière HTTPS, détecté par `X-Forwarded-Proto`) qui donne les droits du PC hôte. Comparaison en temps constant, échecs journalisés, jamais le jeton. Un second cookie lisible, sans valeur de sécurité, indique seulement aux pages d'afficher les contrôles hôte.
+- Contrôle d'origine : les requêtes d'une autre origine sont refusées (hôte comparé sans le schéma, pour fonctionner derrière un proxy HTTPS) ; le WebSocket applique le même contrôle.
+- Le QR code d'un serveur reprend l'adresse utilisée par l'administrateur (`location.origin`).
+- Sur un serveur du réseau local, `--network host` donne au QR code l'IP du réseau et laisse sortir l'annonce mDNS.
+
+### Lancement
+
+Le binaire ouvre le navigateur sur `/control` au démarrage (`rundll32` sous Windows, `open` sous macOS, `xdg-open` sous Linux), sauf avec `LINOS_ADMIN_TOKEN` (serveur) ou `LINOS_BROWSER=off` (tests, développement). `LINOS_HOME` est créé s'il n'existe pas.
 
 ## 6. Journalisation
 
@@ -151,7 +172,8 @@ Image `ghcr.io/gwenaf/linos:<version>` (publiée à chaque release, `Dockerfile`
 - Niveau `info` par défaut : démarrage (dossiers, adresses), connexions WebSocket, arrivées et départs, événements de partie (pack, lancement, pistes, buzz, réponses, pauses, exclusions, fin), erreurs renvoyées aux clients, requêtes HTTP en échec. `LINOS_LOG_LEVEL=debug` ajoute chaque requête HTTP et chaque message reçu.
 - Jamais de jeton dans les journaux.
 - Plantage du salon : l'événement `room crashed` (valeur et pile d'appels) est écrit avant l'arrêt du programme.
-- Erreurs JavaScript des pages (`error`, `unhandledrejection`, échec de chargement) envoyées par `POST /api/log` (8 Ko max) et journalisées en `front error` avec la page et le navigateur.
+- Erreurs JavaScript des pages (`error`, `unhandledrejection`, échec de chargement) envoyées par `POST /api/log` et journalisées en `front error` avec la page et le navigateur. La route reste ouverte (les erreurs des téléphones sont les plus utiles), donc bornée : 8 Ko par rapport et 30 rapports par minute pour toutes les pages, au-delà HTTP 429 sans écriture.
+- `linos.log` ne dépasse jamais 10 Mo : au-delà, il devient `linos.log.1` (qui remplace le précédent) et un nouveau fichier commence. Au plus 20 Mo sur le disque, même sur un serveur public inondé de requêtes : chaque requête d'un autre appareil est journalisée.
 
 ## 7. Points de vigilance
 
