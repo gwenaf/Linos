@@ -63,7 +63,7 @@ Variables d'environnement :
 - `LINOS_HOME` : dossier contenant `packs/` et `linos.log` (défaut : dossier de l'exécutable). Avec `go run`, l'exécutable est dans un dossier temporaire : lancer `LINOS_HOME=bin go run ./cmd/linos`.
 - `LINOS_LOG_LEVEL` : `debug` pour tracer chaque requête et message WebSocket (défaut : info).
 - `LINOS_WEB_DIR` : servir le front depuis le disque (`web/dist`), avec `npm run dev` dans `web/` qui rebuild à chaque modification.
-- `LINOS_ADDR` : adresse d'écoute (défaut `:7777`).
+- `LINOS_ADDR` : adresse d'écoute (défaut `:49154`).
 - `LINOS_EDIT` : `off` désactive l'éditeur `/edit`.
 - `LINOS_ADMIN_TOKEN` : jeton (32 caractères min.) qui, saisi sur `/login`, donne les droits du PC hôte sur un serveur auto-hébergé. Désactive l'ouverture du navigateur.
 - `LINOS_BROWSER` : `off` n'ouvre pas le navigateur au démarrage (tests, développement).

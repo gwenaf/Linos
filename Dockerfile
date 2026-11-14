@@ -1,5 +1,5 @@
 # Linos for self-hosting on a server, run from the browser after signing in at /login:
-#   docker run -d -p 7777:7777 -e LINOS_ADMIN_TOKEN=$(openssl rand -base64 32) -v linos:/data ghcr.io/gwenaf/linos:<version>
+#   docker run -d -p 49154:49154 -e LINOS_ADMIN_TOKEN=$(openssl rand -base64 32) -v linos:/data ghcr.io/gwenaf/linos:<version>
 # Without LINOS_ADMIN_TOKEN, nothing but the player pages answers from another machine.
 # HTTPS (a reverse proxy) is up to the server: the admin cookie would otherwise travel in clear.
 # On a local network server, --network host instead of -p gives the QR code the LAN address and lets mDNS out.
@@ -25,5 +25,5 @@ COPY --from=server --chown=65534:65534 /data /data
 USER 65534:65534
 ENV LINOS_HOME=/data
 VOLUME /data
-EXPOSE 7777
+EXPOSE 49154
 ENTRYPOINT ["/linos"]

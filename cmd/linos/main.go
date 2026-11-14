@@ -42,7 +42,7 @@ func main() {
 	defer logFile.Close()
 	slog.SetDefault(newLogger(io.MultiWriter(os.Stderr, logFile), os.Getenv("LINOS_LOG_LEVEL")))
 
-	addr := ":7777"
+	addr := ":49154"
 	if a := os.Getenv("LINOS_ADDR"); a != "" {
 		addr = a
 	}

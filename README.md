@@ -62,7 +62,7 @@ Le format des packs est décrit dans [`docs/manifest.example.json`](docs/manifes
 Une image Docker est publiée à chaque release, sous le numéro de version (`v0.1.0`…) :
 
 ```sh
-docker run -d -p 7777:7777 -v linos:/data \
+docker run -d -p 49154:49154 -v linos:/data \
   -e LINOS_ADMIN_TOKEN="$(openssl rand -base64 32)" \
   ghcr.io/gwenaf/linos:v0.1.0
 ```
@@ -74,7 +74,7 @@ Connectez-vous sur `/login` avec ce jeton pour piloter la partie et éditer les 
 | Variable | Rôle |
 |---|---|
 | `LINOS_HOME` | Dossier de `packs/` et `linos.log` (défaut : celui de l'exécutable) |
-| `LINOS_ADDR` | Adresse d'écoute (défaut `:7777`) |
+| `LINOS_ADDR` | Adresse d'écoute (défaut `:49154`) |
 | `LINOS_ADMIN_TOKEN` | Active `/login` pour piloter un serveur (32 caractères minimum) |
 | `LINOS_EDIT` | `off` désactive l'éditeur |
 | `LINOS_BROWSER` | `off` n'ouvre pas le navigateur au lancement |
