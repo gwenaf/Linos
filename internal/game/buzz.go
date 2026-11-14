@@ -163,7 +163,11 @@ func (r *Room) resolveAnswer(found []*pack.Guess, whole bool) {
 		label = labels[0]
 	}
 	slog.Info("answer resolved", "player", p.name, "guesses", labels, "correct", correct, "points", points, "ownerLoss", loss)
-	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "guesses": labels, "correct": correct, "points": points}))
+	result := map[string]any{"name": p.name, "guess": label, "guesses": labels, "correct": correct, "points": points}
+	if p.team != nil {
+		result["team"] = p.team.name
+	}
+	r.broadcast(NewMessage("answer-result", result))
 	if points != 0 {
 		r.addPoints(p, points)
 	}

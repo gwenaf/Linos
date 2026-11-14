@@ -303,3 +303,34 @@ func TestEmptyPlaylist(t *testing.T) {
 	send(r, ctrl, "start-game", nil)
 	expectError(t, ctrl, "empty-playlist")
 }
+
+// A random round draws when it starts: after a team played its whole picked theme, only the other
+// theme is left, and the slots nothing is left for are skipped.
+func TestRandomDrawsAfterPicks(t *testing.T) {
+	m := themedManifest("fr", "fr", "en")
+	m["tracks"].(list)[2].(obj)["playbackRate"] = 1.5 // t3, the English one
+	m["rounds"] = list{
+		obj{"name": "Choix", "selection": "theme-pick", "themes": list{"fr", "en"}, "count": 1, "pickScope": "theme"},
+		obj{"name": "Hasard", "selection": "random", "themes": list{"fr", "en"}, "count": 3},
+	}
+	r := newRoom(t, m)
+	alice := newPlayer(t, r, "alice")
+	ctrl, host := launch(t, r, obj{"pack": "basic"}, alice)
+	expect(t, ctrl, "theme-pick-request", nil)
+	send(r, alice, "pick-theme", obj{"theme": "fr"})
+	for range 2 { // t1 and t2, the whole French theme
+		expect(t, host, "track-start", nil)
+		send(r, ctrl, "skip", nil)
+		expect(t, ctrl, "track-end", nil)
+		send(r, ctrl, "skip", nil)
+	}
+	var ts trackStart
+	expect(t, host, "track-start", &ts)
+	if ts.PlaybackRate != 1.5 {
+		t.Fatalf("random round played %+v, want t3: t1 and t2 were played by the pick", ts)
+	}
+	send(r, ctrl, "skip", nil)
+	expect(t, ctrl, "track-end", nil)
+	send(r, ctrl, "skip", nil)
+	expect(t, ctrl, "game-end", nil)
+}

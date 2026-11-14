@@ -18,6 +18,12 @@ const paused = signal(false)
 const scores = signal<Record<string, number>>({})
 const results = signal<Data>(null)
 const elapsed = signal(0)
+// verdict is the last answer validated in buzz mode; holderSince starts the answer countdown.
+const verdict = signal<Data>(null)
+let holderSince = 0
+// tick redraws the answer countdown: the track clock stops while someone answers.
+const tick = signal(0)
+setInterval(() => holder.value && tick.value++, 250)
 const answeredBy = signal<string[]>([])
 const pick = signal<Data>(null)
 const wagerRequest = signal<Data>(null)
@@ -111,6 +117,7 @@ conn.on('track-start', (d) => {
   ended.value = null
   holder.value = null
   answeredBy.value = []
+  verdict.value = null
   pick.value = null
   wagerRequest.value = null
   roundEnd.value = null
@@ -121,8 +128,19 @@ conn.on('answered', (d) => {
   if (!answeredBy.value.includes(who)) answeredBy.value = [...answeredBy.value, who]
 })
 conn.on('timer-start', () => (live.value = true))
-conn.on('buzz-accepted', (d) => (holder.value = d))
-conn.on('answer-result', () => (holder.value = null))
+conn.on('buzz-accepted', (d) => {
+  holder.value = d
+  holderSince = performance.now()
+  verdict.value = null
+})
+// The gamemaster's verdict (or the automatic one) stays on screen a few seconds.
+let verdictTimer: ReturnType<typeof setTimeout> | undefined
+conn.on('answer-result', (d) => {
+  holder.value = null
+  verdict.value = d
+  clearTimeout(verdictTimer)
+  verdictTimer = setTimeout(() => (verdict.value = null), 4000)
+})
 conn.on('track-end', (d) => {
   ended.value = d
   holder.value = null
@@ -224,6 +242,28 @@ function Players({ players }: { players: Data[] }) {
   )
 }
 
+// TimeBar shrinks as time runs out, and turns to a warning for the last 5 seconds.
+function TimeBar({ left, total }: { left: number; total: number }) {
+  const share = total > 0 ? Math.min(1, Math.max(0, left / total)) : 0
+  return (
+    <div class={left <= 5 ? 'timebar last' : 'timebar'}>
+      <span style={{ width: `${share * 100}%` }} />
+    </div>
+  )
+}
+
+// Verdict shows who was right or wrong, what they found and the points.
+function Verdict({ d }: { d: Data }) {
+  const who = d.team ? `${d.name} (${d.team})` : d.name
+  const found: string[] = d.guesses?.length ? d.guesses : d.guess ? [d.guess] : []
+  return (
+    <p class={d.correct ? 'verdict good' : 'verdict bad'}>
+      {d.correct ? `✔ ${who} : ${found.join(', ')}` : `✘ ${who} : raté`}
+      {d.points ? ` ${d.points > 0 ? '+' : ''}${d.points}` : ''}
+    </p>
+  )
+}
+
 const mediaUrl = (name: string) => '/media/' + name.split('/').map(encodeURIComponent).join('/')
 
 function TrackView() {
@@ -303,6 +343,7 @@ function TrackView() {
         {t.owner && <span>Thème de {unitName(t.owner)}</span>}
         {live.value && !ended.value && <span class="countdown">{Math.max(0, Math.ceil(t.duration - elapsed.value))}</span>}
       </header>
+      {live.value && !ended.value && <TimeBar left={t.duration - elapsed.value} total={t.duration} />}
       <Stage
         key={`${t.index}${outroFile ? '-outro' : ''}`}
         src={src}
@@ -311,12 +352,17 @@ function TrackView() {
         mediaRef={video}
         onStarted={outroFile ? undefined : reportStarted}
       />
-      {holder.value && (
-        <p class="holder">
-          {holder.value.name}
-          {holder.value.team && ` (${holder.value.team})`} {t.via === 'device' ? 'répond sur son téléphone' : 'a la main !'}
-        </p>
+      {holder.value && tick.value >= 0 && (
+        <div class="holder">
+          <p>
+            {holder.value.name}
+            {holder.value.team && ` (${holder.value.team})`} {t.via === 'device' ? 'répond sur son téléphone' : 'a la main !'}{' '}
+            <strong class="countdown">{Math.max(0, Math.ceil(holder.value.answerTime - (performance.now() - holderSince) / 1000))}</strong>
+          </p>
+          <TimeBar left={holder.value.answerTime - (performance.now() - holderSince) / 1000} total={holder.value.answerTime} />
+        </div>
       )}
+      {verdict.value && <Verdict d={verdict.value} />}
       {!ended.value && (
         <>
           <p class="guesses">À deviner : {t.guesses.map((g: Data) => g.label).join(', ')}</p>

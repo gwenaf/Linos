@@ -171,7 +171,9 @@ func (r *Room) track() *pack.Track {
 	return r.playlist[r.current].track
 }
 
-// buildPlaylist flattens the rounds into the ordered list of tracks to play; theme-pick tracks are chosen later.
+// buildPlaylist flattens the rounds into the ordered list of tracks to play; theme-pick and random
+// rounds get empty slots, filled when they are played, so a random round skips what earlier rounds
+// played, picked themes included.
 func (r *Room) buildPlaylist() []playItem {
 	m := r.manifest()
 	base := defaultRules.with(m.Rules)
@@ -198,16 +200,36 @@ func (r *Room) buildPlaylist() []playItem {
 			}
 			continue
 		}
-		ids := rd.Tracks
 		if rd.Selection == "random" {
-			ids = randomTracks(m, rd, r.used)
+			// As many slots as can be drawn now; the draw itself happens when the round starts.
+			for range randomTracks(m, rd, r.used) {
+				items = append(items, playItem{round: ri, rules: rr})
+			}
+			continue
 		}
-		for _, id := range ids {
+		for _, id := range rd.Tracks {
 			r.used[id] = true
 			items = append(items, playItem{round: ri, track: byID[id], rules: rr})
 		}
 	}
 	return items
+}
+
+// drawRandom fills the empty slots of random round ri, from the current one, with tracks not played
+// yet; it reports whether the current slot got one.
+func (r *Room) drawRandom(ri int) bool {
+	m := r.manifest()
+	ids := randomTracks(m, m.Rounds[ri], r.used)
+	for i := r.current; i < len(r.playlist) && r.playlist[i].round == ri && len(ids) > 0; i++ {
+		for j := range m.Tracks {
+			if m.Tracks[j].ID == ids[0] {
+				r.playlist[i].track = &m.Tracks[j]
+			}
+		}
+		r.used[ids[0]] = true
+		ids = ids[1:]
+	}
+	return r.playlist[r.current].track != nil
 }
 
 // randomTracks draws up to rd.Count tracks from the round themes, skipping tracks already played.

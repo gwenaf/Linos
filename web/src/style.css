@@ -687,3 +687,60 @@ small.inline {
 .teams li small {
   display: inline;
 }
+
+/* Time left on the TV: the extract, and the answer of whoever has the hand. */
+.timebar {
+  height: 0.6rem;
+  border: 1px solid var(--line);
+  margin-block: 0.4rem;
+}
+
+.timebar span {
+  display: block;
+  height: 100%;
+  background: var(--text);
+  transition: width 0.1s linear;
+}
+
+.timebar.last span {
+  background: var(--warn);
+  animation: blink 0.5s steps(2) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* The verdict after a validated answer, popping in. */
+.verdict {
+  font-size: 2.5rem;
+  font-weight: bold;
+  text-align: center;
+  padding: 0.5rem;
+  border: 2px solid;
+  animation: pop 0.3s ease-out;
+}
+
+.verdict.good {
+  color: var(--good);
+}
+
+.verdict.bad {
+  color: var(--bad);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timebar.last span,
+  .verdict {
+    animation: none;
+  }
+}

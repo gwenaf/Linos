@@ -88,6 +88,13 @@ func (r *Room) playingUnits() []any {
 func (r *Room) prepareTrack() {
 	it := r.playlist[r.current]
 	switch {
+	case it.track == nil && r.manifest().Rounds[it.round].Selection == "random":
+		if !r.drawRandom(it.round) {
+			slog.Info("random track skipped: nothing left to draw", "index", r.current)
+			r.nextTrack()
+			return
+		}
+		r.prepareTrack()
 	case it.track == nil:
 		if !r.requestPick() {
 			slog.Info("theme pick skipped: no theme or team left", "index", r.current)
