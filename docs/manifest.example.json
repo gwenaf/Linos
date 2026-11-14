@@ -81,9 +81,12 @@
     {
       "id": "aha-takeonme",
       "themes": ["intl"],
-      "media": "media/03.mp3",
+      "media": "media/03-basse.mp3",
       "start": 60,
       "playbackRate": 1.25,
+      "outro": 15,
+      "outroMedia": "media/03.mp3",
+      "outroStart": 48,
       "reveal": [
         { "at": 0, "image": "media/04.jpg", "pixelate": 32 },
         { "at": 25, "pixelate": 1 }
@@ -126,9 +129,18 @@
       "selection": "theme-pick",
       "picker": "rotation",
       "themes": ["fr", "clips", "intl"],
-      "count": 6,
+      "count": 3,
+      "pickScope": "theme",
       "rules": {
-        "owner": { "headStart": 10, "exclusive": false, "othersBonus": 20 }
+        "answer": { "partial": "each", "incompletePenalty": 10 },
+        "owner": {
+          "headStart": 5,
+          "exclusive": false,
+          "othersBonus": 20,
+          "othersMultiplier": 2,
+          "stolenPenalty": 0,
+          "stolenLosesPoints": true
+        }
       }
     },
     {

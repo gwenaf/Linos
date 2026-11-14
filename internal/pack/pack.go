@@ -9,8 +9,25 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 )
+
+// MaxManifest bounds manifest.json: a compressed one could otherwise expand without limit.
+const MaxManifest = 1 << 20
+
+// AudioExtensions and mediaExtensions list what browsers play or show natively. A pack may only use
+// these: served from the host, an .html or .svg file would run scripts with the host's rights.
+var (
+	AudioExtensions = []string{".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav"}
+	mediaExtensions = append([]string{".mp4", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif"}, AudioExtensions...)
+)
+
+// IsMedia reports a file a pack can use: audio, video or image.
+func IsMedia(name string) bool {
+	return slices.Contains(mediaExtensions, strings.ToLower(filepath.Ext(name)))
+}
 
 // Pack is a gamepack opened from a folder or a .linospack zip archive.
 type Pack struct {
@@ -61,7 +78,15 @@ func (p *Pack) Close() error {
 }
 
 func (p *Pack) load() error {
-	data, err := fs.ReadFile(p.fsys, "manifest.json")
+	f, err := p.fsys.Open("manifest.json")
+	if err != nil {
+		return err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, MaxManifest+1))
+	f.Close()
+	if err == nil && len(data) > MaxManifest {
+		err = fmt.Errorf("manifest.json is larger than %d bytes", MaxManifest)
+	}
 	if err != nil {
 		return err
 	}
@@ -85,7 +110,7 @@ func Decode(data []byte) (Manifest, error) {
 // Media returns a seekable reader over a pack file, suitable for http.ServeContent.
 // Zip media are read in place, without extraction.
 func (p *Pack) Media(name string) (io.ReadSeekCloser, error) {
-	if !validPath(name) {
+	if !validPath(name) || !IsMedia(name) {
 		return nil, fs.ErrInvalid
 	}
 	if p.zipFiles == nil {

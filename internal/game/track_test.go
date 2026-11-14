@@ -12,6 +12,8 @@ type trackStart struct {
 	Round        int             `json:"round"`
 	Media        string          `json:"media"`
 	PlaybackRate float64         `json:"playbackRate"`
+	OutroMedia   string          `json:"outroMedia"`
+	OutroStart   float64         `json:"outroStart"`
 	Guesses      json.RawMessage `json:"guesses"`
 }
 
@@ -227,6 +229,7 @@ func TestRounds(t *testing.T) {
 	tracks := m["tracks"].(list)
 	tracks[2].(obj)["themes"] = list{"en"}
 	tracks[2].(obj)["playbackRate"] = 1.25
+	tracks[2].(obj)["outro"], tracks[2].(obj)["outroMedia"], tracks[2].(obj)["outroStart"] = 5, "a.mp3", 12
 	m["rounds"] = list{
 		obj{"name": "Seq", "selection": "sequence", "tracks": list{"t1"}},
 		// t1 is already played: one track is drawn among t2 and t4.
@@ -275,8 +278,11 @@ func TestRounds(t *testing.T) {
 		if name == "Rand" && ts.Duration != 12 {
 			t.Fatalf("round rules not applied: duration %v", ts.Duration)
 		}
-		if name == "English" && ts.PlaybackRate != 1.25 {
-			t.Fatalf("playbackRate = %v, want 1.25", ts.PlaybackRate)
+		if name == "English" && (ts.PlaybackRate != 1.25 || ts.OutroMedia != "/media/a.mp3" || ts.OutroStart != 12) {
+			t.Fatalf("track-start = %+v, want playbackRate 1.25 and the outro file from 12 s", ts)
+		}
+		if name != "English" && ts.OutroMedia != "" {
+			t.Fatalf("outroMedia = %q, want none: the outro continues the media", ts.OutroMedia)
 		}
 		send(r, ctrl, "skip", nil)
 	}

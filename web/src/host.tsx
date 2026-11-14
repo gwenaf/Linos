@@ -206,7 +206,10 @@ function TrackView() {
   const t = track.value
   const video = useRef<HTMLVideoElement>(null)
   const reported = useRef(startedBefore)
-  const effects = ended.value ? finalEffects(t.reveal, t.media) : effectsAt(t.reveal, elapsed.value)
+  // After the end, another file may play the outro: the whole song after its bass line alone.
+  const outroFile = !!ended.value && !!t.outroMedia
+  const src = outroFile ? t.outroMedia : t.media
+  const effects = ended.value ? finalEffects(t.reveal, src) : effectsAt(t.reveal, elapsed.value)
 
   const reportStarted = () => {
     if (reported.current === t.index) return
@@ -224,6 +227,16 @@ function TrackView() {
       v.play().catch(() => {})
     })
   }, [t.index])
+
+  // The outro file starts at its own position, at normal speed.
+  useEffect(() => {
+    const v = video.current
+    if (!outroFile || !v) return
+    whenLoaded(v, () => {
+      v.currentTime = t.outroStart ?? 0
+      v.play().catch(() => {})
+    })
+  }, [outroFile, t.index])
 
   // The media plays unless the game is paused or someone holds the hand, or its outro is over.
   const outroOver = useRef(false)
@@ -266,7 +279,14 @@ function TrackView() {
         {t.owner && <span>Thème de {unitName(t.owner)}</span>}
         {live.value && !ended.value && <span class="countdown">{Math.max(0, Math.ceil(t.duration - elapsed.value))}</span>}
       </header>
-      <Stage key={t.index} src={t.media} effects={effects} imageUrl={mediaUrl} mediaRef={video} onStarted={reportStarted} />
+      <Stage
+        key={`${t.index}${outroFile ? '-outro' : ''}`}
+        src={src}
+        effects={effects}
+        imageUrl={mediaUrl}
+        mediaRef={video}
+        onStarted={outroFile ? undefined : reportStarted}
+      />
       {holder.value && (
         <p class="holder">
           {holder.value.name}

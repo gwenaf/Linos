@@ -13,11 +13,17 @@ func speedPoints(hi, lo int, duration, elapsed time.Duration) int {
 }
 
 func (r *Room) addPoints(p *player, points int) {
-	if p.team != nil {
-		p.team.score += points
-		r.broadcastTeamScore(p.team)
+	r.addUnitPoints(unit(p), points)
+}
+
+// addUnitPoints scores a team, or a solo player.
+func (r *Room) addUnitPoints(u any, points int) {
+	if t, ok := u.(*team); ok {
+		t.score += points
+		r.broadcastTeamScore(t)
 		return
 	}
+	p := u.(*player)
 	p.score += points
 	r.broadcast(NewMessage("score-update", map[string]any{"name": p.name, "score": p.score}))
 }

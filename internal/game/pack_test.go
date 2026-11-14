@@ -96,7 +96,14 @@ func TestListPacks(t *testing.T) {
 }
 
 func TestRoomMedia(t *testing.T) {
-	r := newRoom(t, nil)
+	m := basicManifest(1)
+	track := m["tracks"].(list)[0].(obj)
+	track["outro"], track["outroMedia"] = 5, "full.mp3"
+	track["reveal"] = list{obj{"image": "pic.png"}}
+	r := newRoom(t, m)
+	for _, name := range []string{"full.mp3", "pic.png", "unused.mp3"} {
+		os.WriteFile(filepath.Join(r.packsDir, "basic", name), []byte(name), 0o644)
+	}
 	if _, err := r.Media("a.mp3"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("media before configure = %v, want not exist", err)
 	}
@@ -115,6 +122,16 @@ func TestRoomMedia(t *testing.T) {
 	if _, err := r.Media("manifest.json"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("manifest must not be served (it holds the answers), got %v", err)
 	}
+	// The outro file and the reveal pictures are served too; a file the manifest does not use is not.
+	for name, want := range map[string]bool{"full.mp3": true, "pic.png": true, "unused.mp3": false} {
+		f, err := r.Media(name)
+		if (err == nil) != want {
+			t.Errorf("Media(%s) error = %v, want served %v", name, err, want)
+		}
+		if f != nil {
+			f.Close()
+		}
+	}
 }
 
 func TestExampleManifestIsPlayable(t *testing.T) {
@@ -123,7 +140,7 @@ func TestExampleManifestIsPlayable(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	for _, name := range []string{"manifest.json", "media/01.mp4", "media/02.mp4", "media/03.mp3", "media/04.jpg"} {
+	for _, name := range []string{"manifest.json", "media/01.mp4", "media/02.mp4", "media/03.mp3", "media/03-basse.mp3", "media/04.jpg"} {
 		path := filepath.Join(dir, "example", filepath.FromSlash(name))
 		os.MkdirAll(filepath.Dir(path), 0o755)
 		os.WriteFile(path, example, 0o644)

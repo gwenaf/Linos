@@ -142,7 +142,8 @@ conn.on('buzz-accepted', (d) => {
 conn.on('answer-result', (d) => {
   holder.value = null
   const simultaneous = track.value?.mode === 'simultaneous'
-  if (d.correct || (simultaneous && d.final)) done.value = [...done.value, d.guess]
+  // A gamemaster may validate several guesses at once.
+  if (d.correct || (simultaneous && d.final)) done.value = [...done.value, ...(d.guesses?.length ? d.guesses : [d.guess])]
   if (d.name !== me.value) return
   if (d.correct) feedback.value = `Bravo ! +${d.points}`
   else feedback.value = d.remaining > 0 ? `Raté… encore ${d.remaining} essai(s)` : 'Raté…'

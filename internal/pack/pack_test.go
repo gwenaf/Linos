@@ -112,7 +112,7 @@ func TestExampleManifestIsValid(t *testing.T) {
 	}
 	dir := writeDir(t, map[string]string{
 		"manifest.json": string(example),
-		"media/01.mp4":  "", "media/02.mp4": "", "media/03.mp3": "", "media/04.jpg": "",
+		"media/01.mp4":  "", "media/02.mp4": "", "media/03.mp3": "", "media/03-basse.mp3": "", "media/04.jpg": "",
 	})
 	p, err := Open(dir)
 	if err != nil {
@@ -144,12 +144,16 @@ func TestFolderPackMedia(t *testing.T) {
 	if _, err := p.Media("../a.mp3"); !errors.Is(err, fs.ErrInvalid) {
 		t.Fatalf("escaping path error = %v, want invalid", err)
 	}
+	if _, err := p.Media("manifest.json"); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("manifest served as media: %v", err)
+	}
 }
 
 func TestZipPackMedia(t *testing.T) {
 	path := writeFile(t, "test.linospack", zipBytes(t,
 		zipEntry{"manifest.json", mustJSON(t, baseManifest()), zip.Deflate},
 		zipEntry{"a.mp3", "audio", zip.Store},
+		zipEntry{"b.mp3", "audio", zip.Deflate},
 	))
 	p, err := Open(path)
 	if err != nil {
@@ -167,8 +171,11 @@ func TestZipPackMedia(t *testing.T) {
 	if _, err := p.Media("missing.mp3"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing media error = %v, want not exist", err)
 	}
-	if _, err := p.Media("manifest.json"); err == nil {
+	if _, err := p.Media("b.mp3"); err == nil {
 		t.Fatal("compressed entries cannot be served in place")
+	}
+	if _, err := p.Media("a.html"); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("page served as media: %v", err)
 	}
 	if _, err := p.Media("C:/a.mp3"); !errors.Is(err, fs.ErrInvalid) {
 		t.Fatalf("absolute path error = %v, want invalid", err)
@@ -190,6 +197,9 @@ func TestOpenErrors(t *testing.T) {
 	expectErr(t, err, "manifest.json")
 	_, err = Open(writeDir(t, map[string]string{"manifest.json": `{"surprise": true}`}))
 	expectErr(t, err, `unknown field "surprise"`)
+
+	_, err = Open(writeFile(t, "bomb.linospack", zipBytes(t, zipEntry{"manifest.json", strings.Repeat(" ", MaxManifest+1), zip.Deflate})))
+	expectErr(t, err, "larger than")
 }
 
 func TestZipMediaChecks(t *testing.T) {
@@ -209,4 +219,12 @@ func TestZipMediaChecks(t *testing.T) {
 	copy(data[second:], "XXXX")
 	_, err = Open(writeFile(t, "corrupt.linospack", data))
 	expectErr(t, err, "is corrupted")
+}
+
+func TestIsMedia(t *testing.T) {
+	for name, want := range map[string]bool{"clip.MP4": true, "cover.webp": true, "song.mp3": true, "notes.txt": false} {
+		if IsMedia(name) != want {
+			t.Errorf("IsMedia(%q) = %v, want %v", name, !want, want)
+		}
+	}
 }

@@ -56,7 +56,7 @@ func (r *Room) closeBuzzWindow() {
 		// Another team took the hand: the team that failed before may buzz again.
 		r.reboundBlocked = nil
 	}
-	r.turn++
+	r.turn = r.stamp()
 	// Candidates tied inside the window share the first buzz time; the clock stops while the holder answers.
 	r.holderElapsed = r.firstBuzz.Sub(r.trackStart) - r.paused
 	if r.rules.pauseOnBuzz {
@@ -88,8 +88,9 @@ func (r *Room) validate(c *Client, m Message) {
 		return
 	}
 	var d struct {
-		Correct *bool  `json:"correct"`
-		Guess   string `json:"guess"`
+		Correct *bool    `json:"correct"`
+		Guess   string   `json:"guess"`
+		Guesses []string `json:"guesses"`
 	}
 	if !r.decode(c, m, &d) {
 		return
@@ -98,12 +99,23 @@ func (r *Room) validate(c *Client, m Message) {
 		r.sendError(c, "bad-data", "validate requires correct")
 		return
 	}
-	g := r.pendingGuess(d.Guess)
-	if *d.Correct && g == nil {
-		r.sendError(c, "unknown-guess", "no guess left named "+d.Guess)
-		return
+	// A right answer names the guesses found: several at once, or one (by default the first left).
+	var found []*pack.Guess
+	if *d.Correct {
+		labels := d.Guesses
+		if len(labels) == 0 {
+			labels = []string{d.Guess}
+		}
+		for _, label := range labels {
+			g := r.pendingGuess(label)
+			if g == nil || slices.Contains(found, g) {
+				r.sendError(c, "unknown-guess", "no guess left named "+label)
+				return
+			}
+			found = append(found, g)
+		}
 	}
-	r.resolveAnswer(*d.Correct, g)
+	r.resolveAnswer(found, true)
 }
 
 // pendingGuess returns the guess not found yet with that label, or the first one left when the label is empty.
@@ -117,23 +129,46 @@ func (r *Room) pendingGuess(label string) *pack.Guess {
 	return nil
 }
 
-func (r *Room) resolveAnswer(correct bool, g *pack.Guess) {
+// resolveAnswer settles the holder's answer: the guesses found (none for a wrong answer) each pay.
+// A whole answer, validated by the gamemaster, missing guesses counts wrong with partial "all" and
+// costs incompletePenalty with "each"; a phone answers one guess at a time, so neither applies.
+func (r *Room) resolveAnswer(found []*pack.Guess, whole bool) {
 	p := r.holder
 	u := unit(p)
 	r.holder = nil
-	r.turn++
+	r.turn = r.stamp()
 	r.releaseHolderClock()
 
-	points := r.pointsFor(u, g, correct, r.holderElapsed)
+	left := len(r.track().Guesses) - len(r.found)
+	if whole && r.rules.partial == "all" && len(found) < left {
+		found = nil
+	}
+	correct := len(found) > 0
+	points := 0
+	labels := []string{}
+	for _, g := range found {
+		points += r.pointsFor(u, g, true, r.holderElapsed)
+		r.found[g.Label] = true
+		labels = append(labels, g.Label)
+	}
+	switch {
+	case !correct:
+		points = r.pointsFor(u, nil, false, r.holderElapsed)
+	case whole && len(found) < left:
+		points -= r.rules.incompletePenalty
+	}
+	loss := r.ownerLoss(u, correct, points)
 	label := ""
 	if correct {
-		label = g.Label
-		r.found[label] = true
+		label = labels[0]
 	}
-	slog.Info("answer resolved", "player", p.name, "guess", label, "correct", correct, "points", points)
-	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "correct": correct, "points": points}))
+	slog.Info("answer resolved", "player", p.name, "guesses", labels, "correct", correct, "points", points, "ownerLoss", loss)
+	r.broadcast(NewMessage("answer-result", map[string]any{"name": p.name, "guess": label, "guesses": labels, "correct": correct, "points": points}))
 	if points != 0 {
 		r.addPoints(p, points)
+	}
+	if loss != 0 {
+		r.addUnitPoints(r.owner, -loss)
 	}
 
 	switch {

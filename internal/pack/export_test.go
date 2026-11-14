@@ -2,6 +2,7 @@ package pack
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,6 +40,9 @@ func exportManifest() obj {
 			"guesses": list{obj{"label": "Titre", "type": "text", "answers": list{"x"}}}},
 		obj{"id": "photo", "media": "photo.jpg",
 			"guesses": list{obj{"label": "Titre", "type": "text", "answers": list{"x"}}}},
+		// The bass line as question, the whole song from 60 s as answer.
+		obj{"id": "bass", "media": "bass.mp3", "start": 4, "duration": 10, "outro": 12, "outroMedia": "full.mp3", "outroStart": 60,
+			"guesses": list{obj{"label": "Titre", "type": "text", "answers": list{"x"}}}},
 	)
 	return m
 }
@@ -47,6 +51,7 @@ func exportDir(t *testing.T) string {
 	return writeDir(t, map[string]string{
 		"manifest.json": mustJSON(t, exportManifest()),
 		"a.mp3":         "song", "clip.mp4": "video", "photo.jpg": "p", "pic.png": "i", "cover.jpg": "c", "unused.mp3": "u",
+		"bass.mp3": "bass", "full.mp3": "full",
 	})
 }
 
@@ -60,8 +65,11 @@ func TestExportCuts(t *testing.T) {
 	}
 	// The audio track plays 25 s at most (its round) plus a 5 s outro; the clip 8 s at double speed.
 	joined := func(i int) string { return strings.Join(calls[i], " ") }
-	if len(calls) != 3 || !strings.Contains(joined(1), "-ss 10.000") || !strings.Contains(joined(1), "-t 30.000 -vn -c:a copy") ||
-		!strings.Contains(joined(2), "-ss 3.000") || !strings.Contains(joined(2), "-t 16.000 -c:v libx264") {
+	// The bass question is cut to its 10 s alone, its outro file from 60 s for the 12 s outro.
+	if len(calls) != 5 || !strings.Contains(joined(1), "-ss 10.000") || !strings.Contains(joined(1), "-t 30.000 -vn -c:a copy") ||
+		!strings.Contains(joined(2), "-ss 3.000") || !strings.Contains(joined(2), "-t 16.000 -c:v libx264") ||
+		!strings.Contains(joined(3), "-ss 4.000") || !strings.Contains(joined(3), "bass.mp3 -t 10.000") ||
+		!strings.Contains(joined(4), "-ss 60.000") || !strings.Contains(joined(4), "full.mp3 -t 12.000") {
 		t.Fatalf("ffmpeg calls = %q", calls)
 	}
 
@@ -71,7 +79,8 @@ func TestExportCuts(t *testing.T) {
 	}
 	defer p.Close()
 	tracks := p.Manifest.Tracks
-	if tracks[0].Media != "cut/001.mp3" || tracks[0].Start != 0 || tracks[1].Media != "cut/002.mp4" || tracks[2].Media != "photo.jpg" {
+	if tracks[0].Media != "cut/001.mp3" || tracks[0].Start != 0 || tracks[1].Media != "cut/002.mp4" || tracks[2].Media != "photo.jpg" ||
+		tracks[3].Media != "cut/004.mp3" || tracks[3].OutroMedia != "cut/004-outro.mp3" || tracks[3].OutroStart != 0 {
 		t.Fatalf("tracks = %+v", tracks)
 	}
 	var names []string
@@ -79,7 +88,7 @@ func TestExportCuts(t *testing.T) {
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	if want := []string{"cover.jpg", "cut/001.mp3", "cut/002.mp4", "manifest.json", "photo.jpg", "pic.png"}; !slices.Equal(names, want) {
+	if want := []string{"cover.jpg", "cut/001.mp3", "cut/002.mp4", "cut/004-outro.mp3", "cut/004.mp3", "manifest.json", "photo.jpg", "pic.png"}; !slices.Equal(names, want) {
 		t.Fatalf("archive = %q, want %q (unused media left out)", names, want)
 	}
 }
@@ -97,7 +106,19 @@ func TestExportWithoutFFmpeg(t *testing.T) {
 	if err != nil || p.Manifest.Tracks[0].Media != "a.mp3" || p.Manifest.Tracks[0].Start != 10 {
 		t.Fatalf("exported pack = %v, %+v", err, p.Manifest.Tracks)
 	}
-	p.Close()
+	defer p.Close()
+	// Media are copied with their content, not just named.
+	r, err := p.Media("a.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if body, _ := io.ReadAll(r); string(body) != "song" {
+		t.Fatalf("exported a.mp3 = %q, want song", body)
+	}
+	if bass := p.Manifest.Tracks[3]; bass.OutroMedia != "full.mp3" || bass.OutroStart != 60 {
+		t.Fatalf("outro file = %+v, want full.mp3 copied whole, from 60 s", bass)
+	}
 }
 
 func TestExportErrors(t *testing.T) {
@@ -111,6 +132,19 @@ func TestExportErrors(t *testing.T) {
 	expectErr(t, err, "missing")
 	_, err = Export(exportDir(t), dest)
 	expectErr(t, err, "ffmpeg on track t1: exit status 1: bad input")
+
+	// Only the outro file fails.
+	FFmpeg = func(args ...string) ([]byte, error) {
+		if slices.ContainsFunc(args, func(a string) bool { return strings.HasSuffix(a, "full.mp3") }) {
+			return []byte("bad outro"), errors.New("exit status 1")
+		}
+		if len(args) > 1 {
+			os.WriteFile(args[len(args)-1], []byte("cut"), 0o644)
+		}
+		return nil, nil
+	}
+	_, err = Export(exportDir(t), dest)
+	expectErr(t, err, "ffmpeg on the outro of track bass: exit status 1: bad outro")
 
 	// ffmpeg exits fine but writes nothing.
 	FFmpeg = func(args ...string) ([]byte, error) { return nil, nil }
@@ -143,5 +177,18 @@ func TestFFmpegCommand(t *testing.T) {
 	out, err := FFmpeg("-version")
 	if err == nil && !strings.Contains(string(out), "ffmpeg") {
 		t.Fatalf("ffmpeg -version = %q", out)
+	}
+}
+
+func TestManifestFiles(t *testing.T) {
+	m, err := Decode([]byte(mustJSON(t, exportManifest())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := m.Files()
+	slices.Sort(files)
+	want := []string{"a.mp3", "bass.mp3", "clip.mp4", "cover.jpg", "full.mp3", "photo.jpg", "pic.png"}
+	if !slices.Equal(files, want) {
+		t.Fatalf("Files() = %q, want %q", files, want)
 	}
 }

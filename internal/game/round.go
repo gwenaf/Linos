@@ -161,10 +161,21 @@ func (r *Room) pickTheme(c *Client, m Message) {
 		r.sendError(c, "unknown-theme", "no track left in theme "+d.Theme)
 		return
 	}
-	t := tracks[mrand.IntN(len(tracks))]
-	slog.Info("theme picked", "picker", unitLabel(r.picker), "theme", d.Theme, "track", t.ID)
-	r.used[t.ID] = true
-	r.playlist[r.current].track = t
+	it := &r.playlist[r.current]
+	// One track drawn from the theme, or the whole theme in pack order, all owned by the picker.
+	if r.manifest().Rounds[it.round].PickScope != "theme" {
+		tracks = []*pack.Track{tracks[mrand.IntN(len(tracks))]}
+	}
+	slog.Info("theme picked", "picker", unitLabel(r.picker), "theme", d.Theme, "tracks", len(tracks))
+	var more []playItem
+	for _, t := range tracks[1:] {
+		more = append(more, playItem{round: it.round, track: t, rules: it.rules, owner: r.picker})
+	}
+	for _, t := range tracks {
+		r.used[t.ID] = true
+	}
+	it.track, it.owner = tracks[0], r.picker
+	r.playlist = slices.Insert(r.playlist, r.current+1, more...)
 	r.owner = r.picker
 	picked := unitPayload(r.owner)
 	picked["theme"] = d.Theme
@@ -277,7 +288,7 @@ func (r *Room) pointsFor(u any, g *pack.Guess, correct bool, elapsed time.Durati
 		points = gr.max
 	}
 	if correct && r.owner != nil && u != r.owner {
-		points += r.rules.othersBonus
+		points = points*r.rules.othersMultiplier + r.rules.othersBonus
 	}
 	if correct && r.wrongs > 0 {
 		points += gr.reboundBonus
@@ -286,6 +297,19 @@ func (r *Room) pointsFor(u any, g *pack.Guess, correct bool, elapsed time.Durati
 		points *= 2
 	}
 	return points
+}
+
+// ownerLoss is what the theme owner loses when unit u answers for points: nothing unless another
+// team found on its theme.
+func (r *Room) ownerLoss(u any, correct bool, points int) int {
+	if !correct || r.owner == nil || u == r.owner {
+		return 0
+	}
+	loss := r.rules.stolenPenalty
+	if r.rules.stolenLoses {
+		loss += points
+	}
+	return loss
 }
 
 func (r *Room) armHeadStart() {
@@ -367,7 +391,7 @@ func (r *Room) addTiebreak() bool {
 	t := tracks[mrand.IntN(len(tracks))]
 	r.used[t.ID] = true
 	r.tiebreak = tied
-	r.playlist = append(r.playlist, playItem{-1, t, defaultRules.with(m.Rules)})
+	r.playlist = append(r.playlist, playItem{round: -1, track: t, rules: defaultRules.with(m.Rules)})
 	slog.Info("tiebreak", "units", len(tied), "track", t.ID)
 	r.broadcast(NewMessage("tiebreak", map[string]any{"units": unitPayloads(sortedUnits(tied))}))
 	return true

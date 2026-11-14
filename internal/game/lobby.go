@@ -150,7 +150,7 @@ func (r *Room) kick(c *Client, m Message) {
 	r.candidates = slices.DeleteFunc(r.candidates, func(q *player) bool { return q == p })
 	if r.holder == p {
 		r.holder = nil
-		r.turn++
+		r.turn = r.stamp()
 		r.releaseHolderClock()
 		r.openBuzz()
 	}

@@ -55,7 +55,7 @@ func (r *Room) startGame(c *Client) {
 func (r *Room) freeze(state string) {
 	slog.Info("game paused", "state", state)
 	r.state = state
-	r.turn++
+	r.turn = r.stamp()
 	r.candidates = nil
 	r.stopClock()
 }
@@ -130,8 +130,8 @@ func (r *Room) endGame(reason string) {
 	slog.Info("game ended", "reason", reason, "results", r.results())
 	r.broadcast(NewMessage("game-end", map[string]any{"reason": reason, "results": r.results()}))
 	r.state = stateLobby
-	r.turn++
-	r.trackSeq++
+	r.turn = r.stamp()
+	r.trackSeq = r.stamp()
 	r.trackState = ""
 	r.owner, r.tiebreak = nil, nil
 	r.holder = nil

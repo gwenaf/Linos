@@ -127,6 +127,14 @@ type Room struct {
 	holderElapsed time.Duration
 	// turn invalidates pending timers whenever the buzz state moves on.
 	turn int
+	// stamps hands out turn and trackSeq values: always new, so a stale timer can never match.
+	stamps int
+}
+
+// stamp returns a value no turn or trackSeq ever had.
+func (r *Room) stamp() int {
+	r.stamps++
+	return r.stamps
 }
 
 func NewRoom(packsDir string) *Room {
@@ -171,7 +179,7 @@ func (r *Room) run() {
 			}
 		case evAnswerTimeout:
 			if e.turn == r.turn {
-				r.resolveAnswer(false, nil)
+				r.resolveAnswer(nil, false)
 			}
 		case evTrackTimer:
 			r.trackTimer(e.turn)

@@ -7,8 +7,9 @@ import (
 	"github.com/gwenaf/linos/internal/pack"
 )
 
+// scored is points kept hidden until the track ends, for a team or a solo player.
 type scored struct {
-	player *player
+	unit   any
 	points int
 }
 
@@ -50,7 +51,11 @@ func (r *Room) answer(c *Client, m Message, at time.Time) {
 	correct := matches(g, d.Value, r.rules.fuzziness)
 	slog.Info("answer submitted", "player", p.name, "guess", g.Label, "value", d.Value, "correct", correct)
 	if r.loaded.Load().control == "auto" {
-		r.resolveAnswer(correct, g)
+		var found []*pack.Guess
+		if correct {
+			found = []*pack.Guess{g}
+		}
+		r.resolveAnswer(found, false)
 		return
 	}
 	// With a gamemaster, the computed verdict is only a suggestion: control validates.
@@ -93,7 +98,10 @@ func (r *Room) simultaneousAnswer(c *Client, label, value string, at time.Time) 
 		r.lock(u)
 	}
 	r.answered[g.Label][u] = final
-	r.pendingPoints = append(r.pendingPoints, scored{p, points})
+	r.pendingPoints = append(r.pendingPoints, scored{u, points})
+	if loss := r.ownerLoss(u, correct, points); loss != 0 {
+		r.pendingPoints = append(r.pendingPoints, scored{r.owner, -loss})
+	}
 	slog.Info("answer submitted", "player", p.name, "guess", g.Label, "value", value, "correct", correct, "points", points)
 
 	result := submission(p, g, value, correct)

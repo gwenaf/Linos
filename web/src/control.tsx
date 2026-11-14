@@ -34,6 +34,8 @@ const inviteQr = signal<{ url: string; caption: string } | null>(null)
 const controlMode = signal('master')
 // Answers typed on phones: the holder's pending answer (buzz mode) and everything answered (simultaneous mode).
 const holderAnswer = signal<Data>(null)
+// checked holds the guesses the gamemaster ticks as found in the holder's answer.
+const checked = signal<string[]>([])
 const submissions = signal<Data[]>([])
 const pick = signal<Data>(null)
 const wagerRequest = signal<Data>(null)
@@ -175,11 +177,12 @@ conn.on('track-start', (d) => {
 conn.on('buzz-accepted', (d) => {
   holder.value = d
   holderAnswer.value = null
+  checked.value = []
 })
 conn.on('answer-result', (d) => {
   holder.value = null
   holderAnswer.value = null
-  if (d.correct) found.value = [...found.value, d.guess]
+  if (d.correct) found.value = [...found.value, ...(d.guesses?.length ? d.guesses : [d.guess])]
   if (d.value !== undefined) submissions.value = [...submissions.value, d]
 })
 conn.on('track-end', () => {
@@ -434,16 +437,7 @@ function Game() {
               )}
               {configured.value?.control !== 'auto' && (
                 <>
-                  {t.guesses
-                    .filter((g: Data) => !found.value.includes(g.label))
-                    .map((g: Data) => (
-                      <button key={g.label} class="good" onClick={() => conn.send('validate', { correct: true, guess: g.label })}>
-                        Bonne réponse : {g.label}
-                      </button>
-                    ))}
-                  <button class="bad" onClick={() => conn.send('validate', { correct: false })}>
-                    Mauvaise réponse
-                  </button>
+                  <Validation guesses={t.guesses.filter((g: Data) => !found.value.includes(g.label))} />
                 </>
               )}
             </div>
@@ -474,5 +468,36 @@ function Game() {
         <button onClick={() => confirm('Annuler la partie ? Les scores ne seront pas conservés.') && conn.send('abort')}>Annuler la partie</button>
       </section>
     </>
+  )
+}
+
+// Validation lets the gamemaster tick what the holder found, then validate it all at once; nothing
+// ticked is a wrong answer. The pack rules decide how an incomplete answer counts.
+function Validation({ guesses }: { guesses: Data[] }) {
+  const send = (labels: string[]) => conn.send('validate', labels.length > 0 ? { correct: true, guesses: labels } : { correct: false })
+  return (
+    <div class="validation">
+      {guesses.map((g: Data) => (
+        <label key={g.label}>
+          <input
+            type="checkbox"
+            checked={checked.value.includes(g.label)}
+            onChange={(e) =>
+              (checked.value = (e.target as HTMLInputElement).checked ? [...checked.value, g.label] : checked.value.filter((x) => x !== g.label))
+            }
+          />{' '}
+          {g.label} <small>({g.type === 'text' ? (g.answers ?? [])[0] : String(g.answer ?? '')})</small>
+        </label>
+      ))}
+      <button class="primary" onClick={() => send(checked.value)}>
+        Valider {checked.value.length > 0 ? `(${checked.value.length} trouvé${checked.value.length > 1 ? 's' : ''})` : '(rien de trouvé)'}
+      </button>
+      <button class="good" onClick={() => send(guesses.map((g: Data) => g.label))}>
+        Tout bon
+      </button>
+      <button class="bad" onClick={() => send([])}>
+        Mauvaise réponse
+      </button>
+    </div>
   )
 }

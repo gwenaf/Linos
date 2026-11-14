@@ -49,28 +49,44 @@ func Export(dir, dest string) (bool, error) {
 	cut := probeErr == nil
 	files := map[string]string{} // archive name: source file
 	longest := longestDuration(m)
-	for i := range m.Tracks {
-		t := &m.Tracks[i]
-		video := videoExt.MatchString(t.Media)
-		if !cut || !video && !audioExt.MatchString(t.Media) {
-			files[t.Media] = filepath.Join(dir, t.Media)
-			continue
+	// keep stores media as the archive's name, cut from start for length when ffmpeg can.
+	keep := func(media string, start, length float64, name string) (string, float64, error) {
+		video := videoExt.MatchString(media)
+		if !cut || !video && !audioExt.MatchString(media) {
+			files[media] = filepath.Join(dir, media)
+			return media, start, nil
 		}
-		ext := filepath.Ext(t.Media)
-		args := []string{"-v", "error", "-y", "-ss", seconds(t.Start), "-i", filepath.Join(dir, t.Media), "-t", seconds(cutLength(*t, longest))}
+		ext := filepath.Ext(media)
+		// Only plain media demuxers: a file named .mp3 holding an HLS or concat playlist would otherwise
+		// make ffmpeg copy other local files into the shared archive.
+		args := []string{"-v", "error", "-y", "-protocol_whitelist", "file", "-format_whitelist", "mov,mp3,aac,ogg,flac,wav,matroska",
+			"-ss", seconds(start), "-i", filepath.Join(dir, media), "-t", seconds(length)}
 		if video {
 			ext = ".mp4"
 			args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart")
 		} else {
 			args = append(args, "-vn", "-c:a", "copy")
 		}
-		name := fmt.Sprintf("cut/%03d%s", i+1, ext)
+		name += ext
 		out := filepath.Join(tmp, filepath.FromSlash(name))
 		os.MkdirAll(filepath.Dir(out), 0o755) // ffmpeg reports a missing folder
 		if msg, err := FFmpeg(append(args, out)...); err != nil {
-			return true, fmt.Errorf("ffmpeg on track %s: %v: %s", t.ID, err, strings.TrimSpace(string(msg)))
+			return "", 0, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(msg)))
 		}
-		files[name], t.Media, t.Start = out, name, 0
+		files[name] = out
+		return name, 0, nil
+	}
+	for i := range m.Tracks {
+		t := &m.Tracks[i]
+		if t.Media, t.Start, err = keep(t.Media, t.Start, cutLength(*t, longest), fmt.Sprintf("cut/%03d", i+1)); err != nil {
+			return true, fmt.Errorf("ffmpeg on track %s: %w", t.ID, err)
+		}
+		if t.OutroMedia == "" {
+			continue
+		}
+		if t.OutroMedia, t.OutroStart, err = keep(t.OutroMedia, t.OutroStart, t.Outro, fmt.Sprintf("cut/%03d-outro", i+1)); err != nil {
+			return true, fmt.Errorf("ffmpeg on the outro of track %s: %w", t.ID, err)
+		}
 	}
 	for _, name := range referencedImages(m) {
 		files[name] = filepath.Join(dir, name)
@@ -83,16 +99,20 @@ func Export(dir, dest string) (bool, error) {
 	return cut, os.Rename(archive, dest)
 }
 
-// cutLength is the media time the game may play: its duration, then its outro, at its playback rate.
+// cutLength is the media time the game may play: its duration, then its outro unless another file
+// plays it, at its playback rate.
 func cutLength(t Track, longest float64) float64 {
-	d, rate := t.Duration, t.PlaybackRate
+	d, rate, outro := t.Duration, t.PlaybackRate, t.Outro
+	if t.OutroMedia != "" {
+		outro = 0
+	}
 	if d == 0 {
 		d = longest
 	}
 	if rate == 0 {
 		rate = 1
 	}
-	return (d + t.Outro) * rate
+	return (d + outro) * rate
 }
 
 // longestDuration bounds the duration of a track without its own: the pack's, or a round's if longer.

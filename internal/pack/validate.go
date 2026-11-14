@@ -79,8 +79,14 @@ func (p *Pack) validate() error {
 		tracks[t.ID] = true
 		v.refs(at+".themes", t.Themes, themes)
 		v.file(at+".media", t.Media)
-		if t.Start < 0 || t.Duration < 0 || t.PlaybackRate < 0 || t.Outro < 0 {
-			v.fail("%s: start, duration, playbackRate and outro cannot be negative", at)
+		if t.Start < 0 || t.Duration < 0 || t.PlaybackRate < 0 || t.Outro < 0 || t.OutroStart < 0 {
+			v.fail("%s: start, duration, playbackRate, outro and outroStart cannot be negative", at)
+		}
+		if t.OutroMedia != "" {
+			v.file(at+".outroMedia", t.OutroMedia)
+			if t.Outro == 0 {
+				v.fail("%s: an outroMedia needs an outro duration to be heard", at)
+			}
 		}
 		for j, r := range t.Reveal {
 			v.reveal(fmt.Sprintf("%s.reveal[%d]", at, j), r)
@@ -102,6 +108,7 @@ func (p *Pack) validate() error {
 	for i, r := range m.Rounds {
 		at := fmt.Sprintf("rounds[%d]", i)
 		v.oneOf(at+".picker", r.Picker, "", "rotation")
+		v.oneOf(at+".pickScope", r.PickScope, "", "track", "theme")
 		v.rules(at+".rules", r.Rules)
 		switch r.Selection {
 		case "sequence":
@@ -168,6 +175,10 @@ func (v *validator) rules(at string, r *Rules) {
 		v.optionalOneOf(at+".answer.mode", a.Mode, "buzz", "simultaneous")
 		v.optionalOneOf(at+".answer.via", a.Via, "oral", "device")
 		v.optionalOneOf(at+".answer.rebound", a.Rebound, "none", "others", "all")
+		v.optionalOneOf(at+".answer.partial", a.Partial, "each", "all")
+		if a.IncompletePenalty != nil && *a.IncompletePenalty < 0 {
+			v.fail("%s.answer.incompletePenalty cannot be negative", at)
+		}
 		if a.Fuzziness != nil && (*a.Fuzziness < 0 || *a.Fuzziness > 1) {
 			v.fail("%s.answer.fuzziness must be between 0 and 1", at)
 		}
@@ -179,6 +190,14 @@ func (v *validator) rules(at string, r *Rules) {
 		}
 	}
 	v.scoring(at+".scoring", r.Scoring)
+	if o := r.Owner; o != nil {
+		if o.OthersMultiplier != nil && *o.OthersMultiplier < 1 {
+			v.fail("%s.owner.othersMultiplier must be at least 1", at)
+		}
+		if o.StolenPenalty != nil && *o.StolenPenalty < 0 {
+			v.fail("%s.owner.stolenPenalty cannot be negative", at)
+		}
+	}
 }
 
 func (v *validator) scoring(at string, s *Scoring) {
@@ -194,6 +213,10 @@ func (v *validator) scoring(at string, s *Scoring) {
 func (v *validator) file(field, name string) {
 	if !validPath(name) {
 		v.fail("%s %q is not a valid relative path", field, name)
+		return
+	}
+	if !IsMedia(name) {
+		v.fail("%s %q is not a supported media file", field, name)
 		return
 	}
 	if v.p.zipFiles == nil {

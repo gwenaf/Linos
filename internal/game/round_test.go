@@ -322,7 +322,8 @@ func TestTargetScoreEndsTheGame(t *testing.T) {
 }
 
 func TestTiebreak(t *testing.T) {
-	m := themedManifest("fr", "en", "en")
+	// t4 is unplayed but French: sudden death only draws from the English tracks.
+	m := themedManifest("fr", "en", "en", "fr")
 	m["game"] = obj{"tiebreak": obj{"type": "sudden-death", "themes": list{"en"}}}
 	m["rounds"] = list{obj{"name": "R1", "selection": "sequence", "tracks": list{"t1"}}}
 	r := newRoom(t, m)
@@ -343,8 +344,8 @@ func TestTiebreak(t *testing.T) {
 	send(r, carol, "buzz", nil)
 	expectError(t, carol, "not-allowed")
 	var s snapshotMsg
-	if _, s = rejoin(t, r, RoleControl, nil); s.TrackState != trackLive {
-		t.Fatalf("snapshot = %+v", s)
+	if _, s = rejoin(t, r, RoleControl, nil); s.TrackState != trackLive || len(s.Tiebreak) != 2 {
+		t.Fatalf("snapshot = %+v, want the track live and alice and bob in the tiebreak", s)
 	}
 
 	// Nobody scores: another sudden-death track, then no track is left and the game ends tied.

@@ -91,9 +91,9 @@ func (r *Room) configure(c *Client, m Message) {
 	}
 	slog.Info("pack configured", "pack", d.Pack, "title", p.Manifest.Title, "control", control)
 
-	media := map[string]bool{p.Manifest.Cover: true}
-	for _, t := range p.Manifest.Tracks {
-		media[t.Media] = true
+	media := map[string]bool{}
+	for _, name := range p.Manifest.Files() {
+		media[name] = true
 	}
 	if old := r.loaded.Swap(&loadedPack{name: d.Pack, control: control, pack: p, media: media}); old != nil {
 		// ponytail: a media download still streaming from the old pack is cut; reconfiguring only happens in the lobby.

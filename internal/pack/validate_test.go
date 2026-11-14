@@ -1,6 +1,9 @@
 package pack
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func firstTrack(m map[string]any) map[string]any {
 	return m["tracks"].([]any)[0].(map[string]any)
@@ -24,6 +27,11 @@ func TestValidationErrors(t *testing.T) {
 		{"title", func(m obj) { m["title"] = " " }, "title is required"},
 		{"cover missing", func(m obj) { m["cover"] = "cover.jpg" }, `cover "cover.jpg" not found`},
 		{"cover path", func(m obj) { m["cover"] = "../cover.jpg" }, "not a valid relative path"},
+		{"outro media missing", func(m obj) { firstTrack(m)["outroMedia"], firstTrack(m)["outro"] = "full.mp3", 5 }, `tracks[0].outroMedia "full.mp3" not found`},
+		{"outro media type", func(m obj) { firstTrack(m)["outroMedia"], firstTrack(m)["outro"] = "notes.txt", 5 }, "not a supported media file"},
+		{"outro media unheard", func(m obj) { firstTrack(m)["outroMedia"] = "a.mp3" }, "an outroMedia needs an outro duration"},
+		{"outro start", func(m obj) { firstTrack(m)["outroStart"] = -1 }, "outroStart cannot be negative"},
+		{"media type", func(m obj) { m["cover"] = "page.html" }, `"page.html" is not a supported media file`},
 		{"control allowed", func(m obj) { m["game"] = obj{"control": obj{"allowed": list{"robot"}}} }, `game.control.allowed "robot"`},
 		{"control default", func(m obj) { m["game"] = obj{"control": obj{"allowed": list{"master"}, "default": "auto"}} }, "game.control.default"},
 		{"teams mode", func(m obj) { m["game"] = obj{"players": obj{"teams": "sometimes"}} }, "game.players.teams"},
@@ -36,6 +44,13 @@ func TestValidationErrors(t *testing.T) {
 		{"answer via", func(m obj) { m["rules"] = obj{"answer": obj{"via": "telepathy"}} }, "rules.answer.via"},
 		{"rebound", func(m obj) { m["rules"] = obj{"answer": obj{"rebound": "some"}} }, "rules.answer.rebound"},
 		{"fuzziness", func(m obj) { m["rules"] = obj{"answer": obj{"fuzziness": 2}} }, "fuzziness must be between 0 and 1"},
+		{"partial", func(m obj) { m["rules"] = obj{"answer": obj{"partial": "some"}} }, "rules.answer.partial"},
+		{"incomplete penalty", func(m obj) { m["rules"] = obj{"answer": obj{"incompletePenalty": -1}} }, "incompletePenalty cannot be negative"},
+		{"others multiplier", func(m obj) { m["rules"] = obj{"owner": obj{"othersMultiplier": 0}} }, "othersMultiplier must be at least 1"},
+		{"stolen penalty", func(m obj) { m["rules"] = obj{"owner": obj{"stolenPenalty": -5}} }, "stolenPenalty cannot be negative"},
+		{"pick scope", func(m obj) {
+			m["rounds"] = list{obj{"selection": "theme-pick", "themes": list{"fr"}, "count": 1, "pickScope": "all"}}
+		}, "rounds[0].pickScope"},
 		{"attempts", func(m obj) { m["rules"] = obj{"answer": obj{"attempts": 0}} }, "attempts must be at least 1"},
 		{"lockout", func(m obj) { m["rules"] = obj{"answer": obj{"wrongLockout": -1}} }, "wrongLockout cannot be negative"},
 		{"scoring type", func(m obj) { m["rules"] = obj{"scoring": obj{"type": "lottery"}} }, "rules.scoring.type"},
@@ -87,6 +102,33 @@ func TestValidationErrors(t *testing.T) {
 			expectErr(t, err, tc.want)
 		})
 	}
+}
+
+// Limits are inclusive: a bound itself is a valid value.
+func TestValidationBoundaries(t *testing.T) {
+	m := baseManifest()
+	m["game"] = obj{"players": obj{"minTeams": 2, "maxTeams": 2}}
+	// maxTeams 0 means no maximum, so any minimum is fine.
+	m2 := baseManifest()
+	m2["game"] = obj{"players": obj{"minTeams": 2}}
+	if _, err := Open(writeDir(t, map[string]string{"manifest.json": mustJSON(t, m2), "a.mp3": ""})); err != nil {
+		t.Fatalf("minTeams without maxTeams refused: %v", err)
+	}
+	m["rules"] = obj{
+		"answer":  obj{"fuzziness": 0, "wrongLockout": 0},
+		"scoring": obj{"min": 5, "max": 5},
+	}
+	m["rounds"] = list{obj{"selection": "sequence", "tracks": list{"t1"}, "rules": obj{"answer": obj{"fuzziness": 1}}}}
+	firstTrack(m)["outroMedia"], firstTrack(m)["outro"], firstTrack(m)["outroStart"] = "a.mp3", 5, 0
+	m["rules"].(obj)["owner"] = obj{"othersMultiplier": 1, "stolenPenalty": 0}
+	m["rules"].(obj)["answer"].(obj)["incompletePenalty"] = 0
+	data := mustJSON(t, m)
+	data += strings.Repeat(" ", MaxManifest-len(data)) // exactly the size limit
+	p, err := Open(writeDir(t, map[string]string{"manifest.json": data, "a.mp3": ""}))
+	if err != nil {
+		t.Fatalf("boundary values refused: %v", err)
+	}
+	p.Close()
 }
 
 func TestValidationReportsAllErrors(t *testing.T) {

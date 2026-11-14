@@ -62,12 +62,23 @@ type AnswerRules struct {
 	WrongLockout *float64 `json:"wrongLockout,omitempty"`
 	Rebound      *string  `json:"rebound,omitempty"`
 	Fuzziness    *float64 `json:"fuzziness,omitempty"`
+	// Partial is how the gamemaster's validation of an answer missing some guesses counts: "each" pays
+	// each guess found, "all" counts it wrong.
+	Partial *string `json:"partial,omitempty"`
+	// IncompletePenalty is taken when a validated answer leaves guesses unfound (partial "each").
+	IncompletePenalty *int `json:"incompletePenalty,omitempty"`
 }
 
 type OwnerRules struct {
 	HeadStart   *float64 `json:"headStart,omitempty"`
 	Exclusive   *bool    `json:"exclusive,omitempty"`
 	OthersBonus *int     `json:"othersBonus,omitempty"`
+	// OthersMultiplier multiplies the points of a team finding on another team's theme.
+	OthersMultiplier *int `json:"othersMultiplier,omitempty"`
+	// StolenPenalty is taken from the owner when another team finds; with StolenLosesPoints the owner
+	// also loses what that team won.
+	StolenPenalty     *int  `json:"stolenPenalty,omitempty"`
+	StolenLosesPoints *bool `json:"stolenLosesPoints,omitempty"`
 }
 
 type Scoring struct {
@@ -95,11 +106,15 @@ type Track struct {
 	Start        float64  `json:"start,omitempty"`
 	Duration     float64  `json:"duration,omitempty"`
 	PlaybackRate float64  `json:"playbackRate,omitempty"`
-	// Outro is the time the media keeps playing after the track ends, fading out; 0 stops it.
-	Outro   float64  `json:"outro,omitempty"`
-	Reveal  []Reveal `json:"reveal,omitempty"`
-	Guesses []Guess  `json:"guesses,omitempty"`
-	Hints   []Hint   `json:"hints,omitempty"`
+	// Outro is the time played after the track ends, fading out; 0 stops the media.
+	Outro float64 `json:"outro,omitempty"`
+	// OutroMedia, when set, plays for the outro instead of the rest of Media, from OutroStart and at
+	// normal speed: the bass line alone as question, the whole song as answer.
+	OutroMedia string   `json:"outroMedia,omitempty"`
+	OutroStart float64  `json:"outroStart,omitempty"`
+	Reveal     []Reveal `json:"reveal,omitempty"`
+	Guesses    []Guess  `json:"guesses,omitempty"`
+	Hints      []Hint   `json:"hints,omitempty"`
 }
 
 // Reveal is a step of the effects /host applies live: numeric effects move linearly
@@ -138,7 +153,22 @@ type Round struct {
 	Tracks    []string `json:"tracks,omitempty"`
 	Themes    []string `json:"themes,omitempty"`
 	Picker    string   `json:"picker,omitempty"`
-	Count     int      `json:"count,omitempty"`
-	Eliminate int      `json:"eliminate,omitempty"`
-	Rules     *Rules   `json:"rules,omitempty"`
+	// PickScope is what a theme pick plays: "track", one drawn track, or "theme", all its tracks left.
+	PickScope string `json:"pickScope,omitempty"`
+	Count     int    `json:"count,omitempty"`
+	Eliminate int    `json:"eliminate,omitempty"`
+	Rules     *Rules `json:"rules,omitempty"`
+}
+
+// Files lists every file the manifest uses: the cover, the media of the tracks and their outros, and
+// the reveal pictures. The game serves these and nothing else.
+func (m Manifest) Files() []string {
+	files := referencedImages(m)
+	for _, t := range m.Tracks {
+		files = append(files, t.Media)
+		if t.OutroMedia != "" {
+			files = append(files, t.OutroMedia)
+		}
+	}
+	return files
 }

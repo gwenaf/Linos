@@ -31,12 +31,21 @@ type rules struct {
 	headStart    time.Duration
 	exclusive    bool
 	othersBonus  int
-	doubleJokers int
-	attempts     int
-	rebound      string // none, others or all
-	reboundBonus int
-	wrongLockout time.Duration
-	pauseOnBuzz  bool
+	// A team finding on another's theme: its points are multiplied, the owner loses a fixed penalty
+	// and, with stolenLoses, what that team won.
+	othersMultiplier int
+	stolenPenalty    int
+	stolenLoses      bool
+	// partial is "each" (every guess validated pays) or "all" (an answer missing guesses is wrong);
+	// incompletePenalty is taken from an answer that leaves guesses unfound.
+	partial           string
+	incompletePenalty int
+	doubleJokers      int
+	attempts          int
+	rebound           string // none, others or all
+	reboundBonus      int
+	wrongLockout      time.Duration
+	pauseOnBuzz       bool
 }
 
 var defaultRules = rules{
@@ -52,6 +61,9 @@ var defaultRules = rules{
 	attempts:    1,
 	rebound:     "others",
 	pauseOnBuzz: true,
+	partial:     "each",
+
+	othersMultiplier: 1,
 }
 
 func (r rules) with(p *pack.Rules) rules {
@@ -86,6 +98,12 @@ func (r rules) with(p *pack.Rules) rules {
 		if a.PauseOnBuzz != nil {
 			r.pauseOnBuzz = *a.PauseOnBuzz
 		}
+		if a.Partial != nil {
+			r.partial = *a.Partial
+		}
+		if a.IncompletePenalty != nil {
+			r.incompletePenalty = *a.IncompletePenalty
+		}
 	}
 	if o := p.Owner; o != nil {
 		if o.HeadStart != nil {
@@ -96,6 +114,15 @@ func (r rules) with(p *pack.Rules) rules {
 		}
 		if o.OthersBonus != nil {
 			r.othersBonus = *o.OthersBonus
+		}
+		if o.OthersMultiplier != nil {
+			r.othersMultiplier = *o.OthersMultiplier
+		}
+		if o.StolenPenalty != nil {
+			r.stolenPenalty = *o.StolenPenalty
+		}
+		if o.StolenLosesPoints != nil {
+			r.stolenLoses = *o.StolenLosesPoints
 		}
 	}
 	if p.Jokers != nil && p.Jokers.Double != nil {
@@ -137,6 +164,7 @@ type playItem struct {
 	round int         // -1 when the pack has no rounds, and for tiebreak tracks
 	track *pack.Track // nil until picked, in theme-pick rounds
 	rules rules
+	owner any // the team whose picked theme this track belongs to, if any
 }
 
 func (r *Room) track() *pack.Track {
@@ -151,7 +179,7 @@ func (r *Room) buildPlaylist() []playItem {
 	if len(m.Rounds) == 0 {
 		items := make([]playItem, len(m.Tracks))
 		for i := range m.Tracks {
-			items[i] = playItem{-1, &m.Tracks[i], base}
+			items[i] = playItem{round: -1, track: &m.Tracks[i], rules: base}
 			r.used[m.Tracks[i].ID] = true
 		}
 		return items
@@ -166,7 +194,7 @@ func (r *Room) buildPlaylist() []playItem {
 		rr := base.with(rd.Rules)
 		if rd.Selection == "theme-pick" {
 			for range rd.Count {
-				items = append(items, playItem{ri, nil, rr})
+				items = append(items, playItem{round: ri, rules: rr})
 			}
 			continue
 		}
@@ -176,7 +204,7 @@ func (r *Room) buildPlaylist() []playItem {
 		}
 		for _, id := range ids {
 			r.used[id] = true
-			items = append(items, playItem{ri, byID[id], rr})
+			items = append(items, playItem{round: ri, track: byID[id], rules: rr})
 		}
 	}
 	return items
@@ -215,9 +243,9 @@ func (r *Room) nextTrack() {
 		r.broadcast(NewMessage("round-start", r.roundPayload()))
 	}
 	r.rules = it.rules
-	r.trackSeq++
-	r.turn++
-	r.owner, r.picker, r.wagers = nil, nil, nil
+	r.trackSeq = r.stamp()
+	r.turn = r.stamp()
+	r.owner, r.picker, r.wagers = it.owner, nil, nil
 	r.doubled = map[any]bool{}
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false
 	r.prepareTrack()
@@ -286,6 +314,10 @@ func (r *Room) trackPayload(role string) map[string]any {
 	host["start"] = t.Start
 	host["playbackRate"] = rate
 	host["outro"] = t.Outro
+	if t.OutroMedia != "" {
+		host["outroMedia"] = (&url.URL{Path: "/media/" + t.OutroMedia}).EscapedPath()
+		host["outroStart"] = t.OutroStart
+	}
 	host["reveal"] = t.Reveal
 	host["hints"] = t.Hints
 	control := maps.Clone(host)
@@ -357,12 +389,12 @@ func (r *Room) endTrack(reason string) {
 	slog.Info("track ended", "index", r.current, "reason", reason)
 	r.trackState = trackEnded
 	r.endReason = reason
-	r.turn++
+	r.turn = r.stamp()
 	r.holder, r.candidates, r.buzzOpen = nil, nil, false
 	r.broadcast(NewMessage("track-end", r.trackEndPayload()))
 	for _, s := range r.pendingPoints {
 		if s.points != 0 {
-			r.addPoints(s.player, s.points)
+			r.addUnitPoints(s.unit, s.points)
 		}
 	}
 	r.pendingPoints = nil

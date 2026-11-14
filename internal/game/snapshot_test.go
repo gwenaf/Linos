@@ -19,6 +19,7 @@ type snapshotMsg struct {
 	TrackEnd   *trackEnd              `json:"trackEnd"`
 	Holder     *buzzAccepted          `json:"holder"`
 	CanBuzz    *bool                  `json:"canBuzz"`
+	Tiebreak   []unitMsg              `json:"tiebreak"`
 }
 
 // rejoin connects a client (optionally with a token) and returns the state it receives.
