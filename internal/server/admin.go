@@ -1,7 +1,10 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base32"
 	"log/slog"
 	"net/http"
 
@@ -28,6 +31,14 @@ func hostRights(token string) func(*http.Request) bool {
 }
 
 const joinCookie = "linos_join"
+
+// joinKey derives the QR code's join key from the admin token: it survives a restart, so phones that
+// scanned keep playing, and only changes with the token. The token cannot be recovered from it.
+func joinKey(token string) string {
+	mac := hmac.New(sha256.New, []byte(token))
+	mac.Write([]byte("linos join key"))
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(mac.Sum(nil)[:16])
+}
 
 // setJoinCookie keeps the QR code's join key for this browser: reconnections and reloads need no new scan.
 func setJoinCookie(w http.ResponseWriter, r *http.Request, key string) {

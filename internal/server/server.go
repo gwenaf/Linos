@@ -1,7 +1,6 @@
 package server
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -42,10 +41,10 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 	})
 	isHost := hostRights(opts.AdminToken)
 	hostOnly := restrict(isHost)
-	// A self-hosted server is reachable by anyone: its QR code carries a key drawn at start (see joinOnly).
+	// A self-hosted server is reachable by anyone: its QR code carries a join key (see joinOnly).
 	key := ""
 	if opts.AdminToken != "" {
-		key = rand.Text()
+		key = joinKey(opts.AdminToken)
 		adminLogin(mux, opts.AdminToken)
 	}
 	mux.Handle("GET /ws", joinOnly(key, isHost, ws.Handler(room, isHost)))

@@ -102,6 +102,10 @@ func TestJoinKey(t *testing.T) {
 	if !ok || len(key) < 20 {
 		t.Fatalf("join url %q carries no key", join.URLs[0])
 	}
+	// A restart keeps the key, a new token changes it.
+	if key != joinKey(adminToken) || joinKey(adminToken+"x") == key || strings.Contains(key, adminToken) {
+		t.Errorf("join key %q is not derived from the token alone", key)
+	}
 
 	if c := do("/play?k=guess").Result().Cookies(); len(c) != 0 {
 		t.Errorf("wrong key sets %v", c)
