@@ -27,6 +27,30 @@ func hostRights(token string) func(*http.Request) bool {
 	}
 }
 
+const joinCookie = "linos_join"
+
+// setJoinCookie keeps the QR code's join key for this browser: reconnections and reloads need no new scan.
+func setJoinCookie(w http.ResponseWriter, r *http.Request, key string) {
+	http.SetCookie(w, &http.Cookie{Name: joinCookie, Value: key, Path: "/", MaxAge: 12 * 3600,
+		HttpOnly: true, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https", SameSite: http.SameSiteLaxMode})
+}
+
+// joinOnly refuses a websocket without the join key's cookie, unless it has the host's rights:
+// on a self-hosted server, only those who scanned the QR code play. An empty key lets everyone in.
+func joinOnly(key string, isHost func(*http.Request) bool, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if key != "" && !isHost(r) {
+			c, err := r.Cookie(joinCookie)
+			if err != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(key)) != 1 {
+				slog.Warn("websocket without join key refused", "remote", r.RemoteAddr)
+				http.Error(w, "scan the QR code to join", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 const loginPage = `<!doctype html>
 <html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Linos</title>

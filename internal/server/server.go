@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -41,12 +42,20 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 	})
 	isHost := hostRights(opts.AdminToken)
 	hostOnly := restrict(isHost)
-	mux.Handle("GET /ws", ws.Handler(room, isHost))
+	// A self-hosted server is reachable by anyone: its QR code carries a key drawn at start (see joinOnly).
+	key := ""
 	if opts.AdminToken != "" {
+		key = rand.Text()
 		adminLogin(mux, opts.AdminToken)
 	}
+	mux.Handle("GET /ws", joinOnly(key, isHost, ws.Handler(room, isHost)))
 
-	page := func(w http.ResponseWriter, r *http.Request) { http.ServeFileFS(w, r, web, "index.html") }
+	page := func(w http.ResponseWriter, r *http.Request) {
+		if key != "" && r.URL.Query().Get("k") == key {
+			setJoinCookie(w, r, key)
+		}
+		http.ServeFileFS(w, r, web, "index.html")
+	}
 	mux.HandleFunc("GET /control", page)
 	mux.HandleFunc("GET /host", page)
 	mux.HandleFunc("GET /play", page)
@@ -100,6 +109,11 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 		}
 		if opts.PublicURL != "" {
 			urls = []string{strings.TrimSuffix(opts.PublicURL, "/") + "/play"}
+		}
+		if key != "" {
+			for i := range urls {
+				urls[i] += "?k=" + key
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string][]string{"urls": urls})

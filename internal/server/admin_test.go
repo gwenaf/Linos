@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -73,6 +74,59 @@ func TestAdminLogin(t *testing.T) {
 	}
 	if loc := do("GET", "/", adminToken, "", nil).Header().Get("Location"); loc != "/control" {
 		t.Errorf("signed-in home goes to %s, want /control", loc)
+	}
+}
+
+// A self-hosted server lets in only the phones that scanned its QR code, and the host's rights.
+func TestJoinKey(t *testing.T) {
+	h := New(game.NewRoom(t.TempDir()), web, Options{AdminToken: adminToken, PublicURL: "https://quiz.example"})
+	do := func(path string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("GET", path, nil)
+		req.RemoteAddr, req.Host = phone, "quiz.example"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	admin := &http.Cookie{Name: adminCookie, Value: adminToken}
+
+	var join struct{ URLs []string }
+	if err := json.NewDecoder(do("/api/join", admin).Body).Decode(&join); err != nil || len(join.URLs) != 1 {
+		t.Fatalf("join urls: %v %v", join, err)
+	}
+	key, ok := strings.CutPrefix(join.URLs[0], "https://quiz.example/play?k=")
+	if !ok || len(key) < 20 {
+		t.Fatalf("join url %q carries no key", join.URLs[0])
+	}
+
+	if c := do("/play?k=guess").Result().Cookies(); len(c) != 0 {
+		t.Errorf("wrong key sets %v", c)
+	}
+	c := do("/play?k=" + key).Result().Cookies()
+	if len(c) != 1 || c[0].Name != joinCookie || c[0].Value != key || !c[0].HttpOnly || !c[0].Secure {
+		t.Fatalf("join cookie = %+v", c)
+	}
+	for _, tc := range []struct {
+		name   string
+		cookie *http.Cookie
+		want   int
+	}{
+		{"scanned", c[0], http.StatusUpgradeRequired},
+		{"host rights", admin, http.StatusUpgradeRequired},
+		{"no key", nil, http.StatusForbidden},
+		{"wrong key", &http.Cookie{Name: joinCookie, Value: "guess"}, http.StatusForbidden},
+	} {
+		var cookies []*http.Cookie
+		if tc.cookie != nil {
+			cookies = append(cookies, tc.cookie)
+		}
+		if rec := do("/ws", cookies...); rec.Code != tc.want {
+			t.Errorf("%s: %d, want %d", tc.name, rec.Code, tc.want)
+		}
 	}
 }
 

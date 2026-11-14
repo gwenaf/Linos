@@ -145,16 +145,23 @@ conn.on('configured', (d) => {
   controlMode.value = d.control
 })
 conn.on('answer-submitted', (d) => (holderAnswer.value = d))
-const base = () => joinUrls.value[0]?.replace(/\/play$/, '') ?? location.origin
+// The players' address with another path, keeping its join key (?k=) on a self-hosted server.
+const joinUrl = (path: string, invite?: string) => {
+  const u = new URL(joinUrls.value[0] ?? `${location.origin}/play`)
+  u.pathname = path
+  if (invite) u.searchParams.set('invite', invite)
+  else u.search = ''
+  return u.href
+}
 conn.on('master-invite', (d) => {
   inviteQr.value = {
-    url: `${base()}/control?invite=${d.code}`,
+    url: joinUrl('/control', d.code),
     caption: 'Scannez avec le téléphone du maître du jeu, ou ouvrez ce lien sur un autre poste (valable 2 minutes, usage unique)',
   }
 })
 conn.on('reconnect-invite', (d) => {
   inviteQr.value = {
-    url: `${base()}/play?invite=${d.code}`,
+    url: joinUrl('/play', d.code),
     caption: `Scannez avec le téléphone de ${d.name} pour reprendre sa place (valable 2 minutes, usage unique)`,
   }
 })
@@ -400,7 +407,7 @@ function Teams() {
 }
 
 function NetworkHelp() {
-  const health = joinUrls.value[0]?.replace(/\/play$/, '/health')
+  const health = joinUrl('/health')
   return (
     <div class="help">
       <h3>Aucun téléphone ne se connecte ?</h3>

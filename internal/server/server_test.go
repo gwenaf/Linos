@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -122,7 +123,8 @@ func TestJoinAndQR(t *testing.T) {
 		}
 		rec := httptest.NewRecorder()
 		admin.ServeHTTP(rec, req)
-		return strings.TrimSpace(rec.Body.String())
+		// The join key, drawn at start, is checked by TestJoinKey.
+		return regexp.MustCompile(`\?k=[A-Z0-9]+`).ReplaceAllString(strings.TrimSpace(rec.Body.String()), "")
 	}
 	for host, want := range map[string]string{
 		"linos.example:49154": `{"urls":["http://linos.example:49154/play"]}`,
