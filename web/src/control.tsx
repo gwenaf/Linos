@@ -50,12 +50,14 @@ const network = signal<Data>(null)
 const showHelp = signal(false)
 const firewallResult = signal('')
 
-// A self-hosted server is joined at the address its admin uses; the local network helpers do not apply.
-if (isLocalPage && !onHostMachine) joinUrls.value = [`${location.origin}/play`]
-if (isLocalPage && onHostMachine) {
+// The server gives the address players join: the one this page was reached at, or the local ones on localhost.
+if (isLocalPage) {
   fetch('/api/join')
     .then((r) => r.json())
     .then((d) => (joinUrls.value = d.urls))
+}
+// The local network helpers only apply on the host machine.
+if (isLocalPage && onHostMachine) {
   fetch('/api/network')
     .then((r) => r.json())
     .then((d) => (network.value = d))

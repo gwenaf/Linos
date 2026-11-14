@@ -109,6 +109,36 @@ func TestJoinAndQR(t *testing.T) {
 		}
 	}
 
+	// Reached by a name (or any address but the loopback), players are given that address, over
+	// HTTPS when a proxy says so; on [::1] the local addresses stay. Here as an admin signed in.
+	const token = "0123456789abcdef0123456789abcdef"
+	admin := New(game.NewRoom(t.TempDir()), web, Options{AdminToken: token})
+	join := func(host, proto string) string {
+		req := httptest.NewRequest("GET", "/api/join", nil)
+		req.RemoteAddr, req.Host = phone, host
+		req.AddCookie(&http.Cookie{Name: adminCookie, Value: token})
+		if proto != "" {
+			req.Header.Set("X-Forwarded-Proto", proto)
+		}
+		rec := httptest.NewRecorder()
+		admin.ServeHTTP(rec, req)
+		return strings.TrimSpace(rec.Body.String())
+	}
+	for host, want := range map[string]string{
+		"linos.example:49154": `{"urls":["http://linos.example:49154/play"]}`,
+		"192.168.1.20:49154":  `{"urls":["http://192.168.1.20:49154/play"]}`,
+	} {
+		if got := join(host, ""); got != want {
+			t.Errorf("Host %s: %s, want %s", host, got, want)
+		}
+	}
+	if got := join("linos.example", "https"); got != `{"urls":["https://linos.example/play"]}` {
+		t.Errorf("behind HTTPS: %s", got)
+	}
+	if got := join("[::1]:49154", ""); strings.Contains(got, "[::1]") {
+		t.Errorf("loopback must give the local addresses: %s", got)
+	}
+
 	// In a container or behind a proxy, the address given at startup is the only one shown.
 	h = New(game.NewRoom(t.TempDir()), web, Options{PublicURL: "https://quiz.example/"})
 	check(t, h, []request{{"public address", "/api/join", local, http.StatusOK, `{"urls":["https://quiz.example/play"]}`}})

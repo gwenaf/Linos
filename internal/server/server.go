@@ -84,6 +84,20 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 		for _, ip := range network.LocalIPs() {
 			urls = append(urls, "http://"+net.JoinHostPort(ip, port)+"/play")
 		}
+		// Reached by a name or an address other than this machine's loopback (linos.example:49154,
+		// a LAN address), that address is the one players can use too: the local addresses are only
+		// for a browser on localhost.
+		hostname := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			hostname = h
+		}
+		if hostname = strings.Trim(hostname, "[]"); hostname != "localhost" && !net.ParseIP(hostname).IsLoopback() {
+			scheme := "http"
+			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+				scheme = "https"
+			}
+			urls = []string{scheme + "://" + r.Host + "/play"}
+		}
 		if opts.PublicURL != "" {
 			urls = []string{strings.TrimSuffix(opts.PublicURL, "/") + "/play"}
 		}
