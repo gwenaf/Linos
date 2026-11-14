@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { Banner, IMAGE, Stage, droppedFiles, effectsAt, finalEffects, outroVolume, whenLoaded } from './ui'
 import { Waveform } from './waveform'
+import { merge } from './merge'
 import { type RoundType, applyType, baseRules, describe, roundTypes, typeOf } from './rounds'
 import type { Data } from './ws'
 
@@ -77,6 +78,8 @@ async function open(name: string) {
   }
   const d = await res.json()
   current.value = name
+  base = structuredClone(d.manifest)
+  version = res.headers.get('ETag') ?? ''
   manifest.value = d.manifest
   media.value = d.media
   problems.value = d.problems
@@ -153,6 +156,10 @@ async function create() {
 let saving = Promise.resolve()
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let edits = 0
+// Another editor may work on the same pack: base is the last manifest known to be on disk and version
+// its tag. A save from an older version is refused; the other editor's changes are then merged in.
+let base: Data = null
+let version = ''
 
 // save writes the manifest if it changed; it resolves once every pending save is done.
 function save() {
@@ -161,21 +168,59 @@ function save() {
   return saving
 }
 
-async function saveNow() {
+async function saveNow(): Promise<void> {
   if (!dirty.value || !current.value) return
   const sent = edits
+  const body = JSON.stringify(prune(manifest.value))
   status.value = 'Enregistrement…'
-  const res = await request(packUrl(), { method: 'PUT', body: JSON.stringify(prune(manifest.value)) })
+  const res = await request(packUrl(), { method: 'PUT', headers: { 'If-Match': version }, body })
+  if (res.status === 412) {
+    await pull()
+    return saveNow()
+  }
   if (!res.ok) {
     status.value = `Échec de l'enregistrement : ${await res.text()}`
     return
   }
   const d = await res.json()
+  base = JSON.parse(body)
+  version = res.headers.get('ETag') ?? ''
   if (sent !== edits) return // changed meanwhile: the next save reports
   problems.value = d.problems
   dirty.value = false
   status.value = 'Enregistré'
 }
+
+// pull brings in what another editor saved, merged with the changes not saved here yet.
+async function pull() {
+  const name = current.value
+  const res = await request(packUrl(), { headers: { 'If-None-Match': version } })
+  if (res.status !== 200 || name !== current.value) return
+  const d = await res.json()
+  const merged = merge(base, prune(manifest.value), d.manifest) as Data
+  base = d.manifest
+  version = res.headers.get('ETag') ?? ''
+  media.value = d.media
+  problems.value = d.problems
+  manifest.value = merged
+  if (preview.value) preview.value = trackById(preview.value.id) ?? null
+  status.value = 'Modifié par un autre éditeur : changements repris.'
+  if (JSON.stringify(merged) !== JSON.stringify(d.manifest)) {
+    dirty.value = true
+    edits++
+  }
+}
+
+// Every two seconds, an open pack takes in the changes of other editors (unchanged: a 304, nothing to do).
+let pulling = false
+setInterval(() => {
+  if (!current.value || pulling || document.hidden) return
+  pulling = true
+  saving = saving
+    .then(pull)
+    .catch(() => {})
+    .finally(() => (pulling = false))
+}, 2000)
 
 // exportPack writes packs/<name>.linospack, media cut by ffmpeg when it is installed.
 async function exportPack() {
@@ -1047,11 +1092,12 @@ function RoundPreview({ r, pool }: { r: Data; pool: string[] }) {
   )
 }
 
+// newTrackId is random, so two editors adding a question at once never pick the same id.
 function newTrackId(tracks: Data[]) {
   const ids = new Set(tracks.map((t) => t.id))
-  let n = tracks.length + 1
-  while (ids.has(`t${n}`)) n++
-  return `t${n}`
+  let id = ''
+  while (!id || ids.has(id)) id = `t${Math.random().toString(36).slice(2, 8)}`
+  return id
 }
 
 // sendMedia uploads files to the pack and returns, for each, its name and the guesses its tags suggest.

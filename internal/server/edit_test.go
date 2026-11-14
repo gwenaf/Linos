@@ -110,6 +110,34 @@ func TestEditor(t *testing.T) {
 	if !strings.Contains(string(saved), "\n  \"title\": \"Quiz\"") {
 		t.Fatalf("manifest not saved indented: %s", saved)
 	}
+	// Two editors: a save from the current version passes, one from an older version is refused with
+	// the current version; an unchanged pack polls as 304.
+	cond := func(method, header, tag, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "/api/edit/quiz", strings.NewReader(body))
+		req.RemoteAddr, req.Host = local, "localhost:7777"
+		req.Header.Set(header, tag)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	v1 := do("GET", "/api/edit/quiz", "", "").Header().Get("ETag")
+	want(cond("GET", "If-None-Match", v1, ""), http.StatusNotModified, "")
+	saved2 := cond("PUT", "If-Match", v1, manifest)
+	want(saved2, http.StatusOK, `"problems":[]`)
+	v2 := saved2.Header().Get("ETag")
+	if v2 != v1 { // same manifest written again: same version
+		t.Fatalf("version changed from %s to %s for the same manifest", v1, v2)
+	}
+	other := strings.Replace(manifest, `"Quiz"`, `"Quiz 2"`, 1)
+	v3 := cond("PUT", "If-Match", v2, other).Header().Get("ETag")
+	stale := cond("PUT", "If-Match", v2, manifest)
+	want(stale, http.StatusPreconditionFailed, "another editor")
+	if stale.Header().Get("ETag") != v3 {
+		t.Fatalf("a refused save must give the current version %s, got %s", v3, stale.Header().Get("ETag"))
+	}
+	want(cond("GET", "If-None-Match", v1, ""), http.StatusOK, "Quiz 2")
+	want(do("PUT", "/api/edit/quiz", "application/json", manifest), http.StatusOK, `"problems":[]`)
 	want(do("PUT", "/api/edit/quiz", "application/json", `{"titel":"typo"}`), http.StatusBadRequest, "unknown field")
 	want(do("PUT", "/api/edit/quiz", "application/json", `{} trailing`), http.StatusBadRequest, "invalid character")
 

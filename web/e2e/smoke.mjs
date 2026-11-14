@@ -195,7 +195,23 @@ try {
   // Ending the track: the TV plays the outro file instead of the rest of the question.
   await click(control, 'Passer la piste')
   await until(host, () => decodeURIComponent(document.querySelector('.stage video')?.src ?? '').endsWith('Artist - Second.wav'))
-  console.log('smoke: editor, export, control, TV with outro file, and phone OK')
+  // Two editors on the same pack, each changing something else: both changes end up saved and shown.
+  const other = await open('/edit')
+  await click(other, 'smoke')
+  await other.waitForSelector('.outline')
+  await edit.bringToFront()
+  const title = await edit.waitForSelector('input.title')
+  await title.evaluate((i) => i.select())
+  await title.type('smoke duo')
+  await title.press('Tab')
+  await (await other.waitForSelector('.outline .new-theme input')).type('Blues\n')
+  const both = (page) =>
+    until(page, () => document.querySelector('input.title')?.value === 'smoke duo' && document.querySelector('.outline').innerText.includes('Blues'))
+  await both(edit)
+  await both(other)
+  const saved = await edit.evaluate(async () => (await (await fetch('/api/edit/smoke')).json()).manifest)
+  if (saved.title !== 'smoke duo' || !saved.themes.some((t) => t.name === 'Blues')) throw new Error(`two editors: saved ${JSON.stringify(saved)}`)
+  console.log('smoke: editor, export, control, TV with outro file, phone, and two editors OK')
 } catch (e) {
   failed = true
   console.error('smoke failed:', e.message, e.stack.split('\n').find((l) => l.includes('smoke.mjs')))

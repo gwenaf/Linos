@@ -26,7 +26,10 @@ web/src/ws.ts       connexion WebSocket commune (reconnexion, jetons)
 web/src/control.tsx pilotage de la partie (PC hôte ou téléphone maître du jeu)
 web/src/host.tsx    affichage du jeu (TV) : médias, dévoilements, indices
 web/src/play.tsx    manette mobile
-web/src/edit.tsx    éditeur de packs (PC hôte)
+web/src/edit.tsx    éditeur de packs (PC hôte) : questions à gauche, question ouverte à droite
+web/src/waveform.tsx forme d'onde pour découper un extrait (crêtes calculées par le navigateur)
+web/src/rounds.ts   types de manche (préréglages) et résumé en clair des règles, pour l'éditeur
+web/src/merge.ts    fusion à trois voies des manifests, pour deux éditeurs sur un même pack
 docs/               specs
 ```
 

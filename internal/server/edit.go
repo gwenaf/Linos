@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gwenaf/linos/internal/pack"
 	"github.com/gwenaf/linos/internal/tags"
@@ -22,6 +25,8 @@ import (
 // editor serves /edit and its API: host machine only, and only folder packs of packsDir are written.
 func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc, hostOnly func(http.HandlerFunc) http.HandlerFunc) {
 	mux.HandleFunc("GET /edit", hostOnly(page))
+	// saving makes a manifest's version check and write one step, so two editors cannot both pass it.
+	var saving sync.Mutex
 
 	// Folder packs are edited in place; archives are listed so they can be unpacked into a folder.
 	mux.HandleFunc("GET /api/edit", hostOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -137,10 +142,17 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc, hostOnly
 		w.WriteHeader(http.StatusCreated)
 	}))
 
+	// Several editors can work on a pack: each polls it, unchanged answers are 304, and the ETag is the
+	// version a save must start from.
 	mux.HandleFunc("GET /api/edit/{pack}", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
 		manifest, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("ETag", version(manifest))
+		if r.Header.Get("If-None-Match") == version(manifest) {
+			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 		media := []string{}
@@ -166,11 +178,25 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc, hostOnly
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), out.Bytes(), 0o644); err != nil {
+		path := filepath.Join(dir, "manifest.json")
+		saving.Lock()
+		defer saving.Unlock()
+		// A save made from an older version would erase another editor's changes: the editor merges
+		// them and saves again.
+		if base := r.Header.Get("If-Match"); base != "" {
+			current, _ := os.ReadFile(path) // unreadable: no version matches, the write below reports
+			if base != version(current) {
+				w.Header().Set("ETag", version(current))
+				http.Error(w, "the pack was changed by another editor", http.StatusPreconditionFailed)
+				return
+			}
+		}
+		if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		slog.Info("pack saved", "pack", r.PathValue("pack"))
+		w.Header().Set("ETag", version(out.Bytes()))
 		writeJSON(w, map[string]any{"problems": problems(dir)})
 	})))
 
@@ -297,6 +323,12 @@ func withPack(packsDir string, h func(http.ResponseWriter, *http.Request, string
 		}
 		h(w, r, dir)
 	}
+}
+
+// version names a manifest's content, as an HTTP entity tag.
+func version(manifest []byte) string {
+	sum := sha256.Sum256(manifest)
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
 }
 
 func fileExists(p string) bool {

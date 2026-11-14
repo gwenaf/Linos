@@ -143,6 +143,9 @@ func TestImportErrors(t *testing.T) {
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Fatalf("a truncated file must not stay, found %v", entries)
 	}
+	if _, err := Save(filepath.Join(dir, "missing"), reader(body(t, upload{"a.mp3", nil})), isAudio); err == nil {
+		t.Fatal("saving into a missing folder must fail")
+	}
 	if _, err := Import(packs, multipart.NewReader(strings.NewReader("--b\r\nbroken"), "b"), Options{}); err == nil {
 		t.Fatal("a malformed upload must fail")
 	}

@@ -106,14 +106,14 @@ func Save(dir string, files *multipart.Reader, accept func(string) bool) (Saved,
 			}
 			continue
 		}
-		p := uniquePath(dir, name)
-		h := sha256.New()
-		f, err := os.Create(p)
-		if err == nil {
-			_, err = io.Copy(io.MultiWriter(f, h), part)
-			err = errors.Join(err, f.Close())
-		}
+		f, err := createUnique(dir, name)
 		if err != nil {
+			return s, err
+		}
+		p := f.Name()
+		h := sha256.New()
+		_, err = io.Copy(io.MultiWriter(f, h), part)
+		if err = errors.Join(err, f.Close()); err != nil {
 			os.Remove(p) // no half-written file left behind
 			return s, err
 		}
@@ -162,18 +162,18 @@ func safeName(name string) string {
 	}, name)
 }
 
-func uniquePath(dir, name string) string {
+// createUnique creates name in dir, numbered if taken. The creation itself claims the name, so two
+// uploads at once never write into the same file.
+func createUnique(dir, name string) (*os.File, error) {
 	ext := filepath.Ext(name)
 	p := filepath.Join(dir, name)
-	for i := 2; fileExists(p); i++ {
+	for i := 2; ; i++ {
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if !os.IsExist(err) {
+			return f, err
+		}
 		p = filepath.Join(dir, fmt.Sprintf("%s-%d%s", strings.TrimSuffix(name, ext), i, ext))
 	}
-	return p
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 type info struct {
