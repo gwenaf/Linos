@@ -18,6 +18,9 @@ import (
 	"github.com/gwenaf/linos/internal/ws"
 )
 
+// allowFirewall opens the firewall to Linos. Tests replace it: the real one asks Windows for elevation.
+var allowFirewall = network.AllowFirewall
+
 // Options configure what the server exposes.
 type Options struct {
 	// Edit enables the pack editor.
@@ -100,7 +103,7 @@ func New(room *game.Room, web fs.FS, opts Options) http.Handler {
 
 	mux.HandleFunc("POST /api/firewall", hostOnly(func(w http.ResponseWriter, r *http.Request) {
 		exe, _ := os.Executable() // cannot fail on Windows, the only platform AllowFirewall acts on
-		if err := network.AllowFirewall(exe); err != nil {
+		if err := allowFirewall(exe); err != nil {
 			slog.Warn("firewall rule not added", "error", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

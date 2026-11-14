@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -193,10 +192,11 @@ func TestWebSocketThroughRequestLog(t *testing.T) {
 }
 
 func TestNetworkHelpers(t *testing.T) {
-	prev := network.Command
-	t.Cleanup(func() { network.Command = prev })
+	prev, prevAllow := network.Command, allowFirewall
+	t.Cleanup(func() { network.Command, allowFirewall = prev, prevAllow })
+	network.Command = func(string, ...string) ([]byte, error) { return []byte("Public"), nil }
 	var fail error
-	network.Command = func(string, ...string) ([]byte, error) { return []byte("Public"), fail }
+	allowFirewall = func(string) error { return fail }
 	h := New(game.NewRoom(t.TempDir()), web, Options{})
 
 	check(t, h, []request{{"network info", "/api/network", local, http.StatusOK, `"hotspot":"192.168.137."`}})
@@ -217,7 +217,7 @@ func TestNetworkHelpers(t *testing.T) {
 	if code := firewall(local, "http://evil.example"); code != http.StatusForbidden {
 		t.Errorf("cross-origin: %d, want 403", code)
 	}
-	if code := firewall(local, "http://localhost:7777"); code != http.StatusNoContent && runtime.GOOS == "windows" {
+	if code := firewall(local, "http://localhost:7777"); code != http.StatusNoContent {
 		t.Errorf("same origin: %d, want 204", code)
 	}
 	fail = errors.New("UAC refused")
