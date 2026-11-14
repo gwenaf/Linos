@@ -1,6 +1,8 @@
 package tags
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,19 +21,8 @@ import (
 	"github.com/gwenaf/linos/internal/pack"
 )
 
-// audio and media list the extensions browsers play or show natively; an upload keeps only these files.
-var (
-	audio = []string{".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wav"}
-	media = append([]string{".mp4", ".m4v", ".webm", ".jpg", ".jpeg", ".png", ".webp", ".gif"}, audio...)
-)
-
 func isAudio(name string) bool {
-	return slices.Contains(audio, strings.ToLower(filepath.Ext(name)))
-}
-
-// IsMedia reports a file a pack can use: audio, video or image.
-func IsMedia(name string) bool {
-	return slices.Contains(media, strings.ToLower(filepath.Ext(name)))
+	return slices.Contains(pack.AudioExtensions, strings.ToLower(filepath.Ext(name)))
 }
 
 // importOutro keeps the music playing a little after the answer, as before tracks had an outro.
@@ -59,7 +50,9 @@ func Import(packsDir string, files *multipart.Reader, opts Options) (Result, err
 		return Result{}, err
 	}
 	res := Result{Pack: name}
-	_, res.Skipped, err = Save(dir, files, isAudio)
+	var saved Saved
+	saved, err = Save(dir, files, isAudio)
+	res.Skipped = saved.Skipped
 	if err == nil {
 		res.Tracks, err = writeManifest(dir, "Import du "+now.Format("02/01/2006 15:04"), opts)
 	}
@@ -86,36 +79,75 @@ func newPackDir(packsDir, base string) (dir, name string, err error) {
 	}
 }
 
-// Save writes the uploaded files accept keeps into dir, renaming on conflict, and returns
-// the saved names and the skipped uploads.
-func Save(dir string, files *multipart.Reader, accept func(string) bool) (saved, skipped []string, err error) {
-	saved, skipped = []string{}, []string{}
+// Saved is the outcome of an upload: the files written, the files already there (an identical file
+// exists: its name, relative to the folder, is returned and nothing is written) and the files refused.
+type Saved struct {
+	New      []string
+	Existing []string
+	Skipped  []string
+}
+
+// Save writes the uploaded files accept keeps into dir, renaming on conflict. A file identical to one
+// already in dir, or below, is not copied again. A file interrupted mid-upload is removed.
+func Save(dir string, files *multipart.Reader, accept func(string) bool) (Saved, error) {
+	s := Saved{New: []string{}, Existing: []string{}, Skipped: []string{}}
 	for {
 		part, err := files.NextPart()
 		if err == io.EOF {
-			return saved, skipped, nil
+			return s, nil
 		}
 		if err != nil {
-			return saved, skipped, err
+			return s, err
 		}
 		name := safeName(part.FileName())
 		if !accept(name) {
 			if part.FileName() != "" {
-				skipped = append(skipped, part.FileName())
+				s.Skipped = append(s.Skipped, part.FileName())
 			}
 			continue
 		}
 		p := uniquePath(dir, name)
+		h := sha256.New()
 		f, err := os.Create(p)
 		if err == nil {
-			_, err = io.Copy(f, part)
+			_, err = io.Copy(io.MultiWriter(f, h), part)
 			err = errors.Join(err, f.Close())
 		}
 		if err != nil {
-			return saved, skipped, err
+			os.Remove(p) // no half-written file left behind
+			return s, err
 		}
-		saved = append(saved, filepath.Base(p))
+		if same := sameFile(dir, p, h.Sum(nil), accept); same != "" {
+			os.Remove(p)
+			s.Existing = append(s.Existing, same)
+			continue
+		}
+		s.New = append(s.New, filepath.Base(p))
 	}
+}
+
+// sameFile finds a file of dir, or below, that accept keeps and that holds the content hashed as sum,
+// other than path itself. Only files of the same size are read.
+func sameFile(dir, path string, sum []byte, accept func(string) bool) string {
+	info, _ := os.Stat(path) // just written
+	found := ""
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if found != "" || err != nil || d.IsDir() || p == path || !accept(p) {
+			return nil
+		}
+		i, _ := d.Info()
+		f, err := os.Open(p)
+		if i != nil && i.Size() == info.Size() && err == nil {
+			h := sha256.New()
+			if _, err := io.Copy(h, f); err == nil && bytes.Equal(h.Sum(nil), sum) {
+				found, _ = filepath.Rel(dir, p) // p is below dir
+				found = filepath.ToSlash(found)
+			}
+		}
+		f.Close() // nil-safe
+		return nil
+	})
+	return found
 }
 
 // safeName keeps the base name of an uploaded file (browsers may send "folder/song.mp3")

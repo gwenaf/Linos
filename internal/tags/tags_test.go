@@ -135,6 +135,14 @@ func TestImportErrors(t *testing.T) {
 	if _, err := Import(packs, reader(truncated, boundary), Options{}); err == nil {
 		t.Fatal("a truncated upload must fail")
 	}
+	dir := t.TempDir()
+	truncated = bytes.NewBuffer(buf.Bytes()[:buf.Len()-600])
+	if _, err := Save(dir, reader(truncated, boundary), isAudio); err == nil {
+		t.Fatal("a truncated upload must fail")
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("a truncated file must not stay, found %v", entries)
+	}
 	if _, err := Import(packs, multipart.NewReader(strings.NewReader("--b\r\nbroken"), "b"), Options{}); err == nil {
 		t.Fatal("a malformed upload must fail")
 	}
@@ -171,10 +179,20 @@ func TestRead(t *testing.T) {
 	}
 }
 
-func TestIsMedia(t *testing.T) {
-	for name, want := range map[string]bool{"clip.MP4": true, "cover.webp": true, "song.mp3": true, "notes.txt": false} {
-		if IsMedia(name) != want {
-			t.Errorf("IsMedia(%q) = %v, want %v", name, !want, want)
-		}
+func TestSaveSkipsIdenticalFiles(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "media"), 0o755)
+	os.WriteFile(filepath.Join(dir, "media", "old.mp3"), []byte("same"), 0o644)
+	os.WriteFile(filepath.Join(dir, "other.mp3"), []byte("diff"), 0o644) // same size, other content
+	buf, boundary := body(t, upload{"again.mp3", []byte("same")}, upload{"new.mp3", []byte("fresh")}, upload{"twice.mp3", []byte("fresh")})
+	s, err := Save(dir, reader(buf, boundary), isAudio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(s.New, ",") != "new.mp3" || strings.Join(s.Existing, ",") != "media/old.mp3,new.mp3" {
+		t.Fatalf("saved = %+v, want only new.mp3 written, the others found as media/old.mp3 and new.mp3", s)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "again.mp3")); !os.IsNotExist(err) {
+		t.Fatalf("an identical upload must not be kept: %v", err)
 	}
 }

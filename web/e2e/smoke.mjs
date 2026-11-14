@@ -44,7 +44,7 @@ function wav(seconds) {
 
 const exe = join(home, process.platform === 'win32' ? 'linos.exe' : 'linos')
 execFileSync('go', ['build', '-o', exe, './cmd/linos'], { cwd: root, stdio: 'inherit', env: { ...process.env, CGO_ENABLED: '0' } })
-const server = spawn(exe, [], { env: { ...process.env, LINOS_HOME: home, LINOS_ADDR: '127.0.0.1:0' } })
+const server = spawn(exe, [], { env: { ...process.env, LINOS_HOME: home, LINOS_ADDR: '127.0.0.1:0', LINOS_BROWSER: 'off' } })
 const base = await new Promise((ok, ko) => {
   server.on('exit', (code) => ko(new Error(`linos exited with ${code}`)))
   server.stderr.on('data', (chunk) => {
@@ -88,26 +88,75 @@ async function click(page, text) {
 }
 
 let failed = false
-let host, phone
+let host, phone, edit
 try {
-  // Editor: create a pack from two media, check a problem is reported, then export it.
-  const edit = await open('/edit')
+  // Editor: an empty pack is set up by the wizard, then opens on its first question; each question gets its file, the first one
+  // reveals with the other file; a theme round with no theme is reported, then removed; the pack is exported.
+  edit = await open('/edit')
   await expectText(edit, 'Nouveau pack')
-  await edit.type('input[placeholder="Nom du dossier"]', 'smoke')
+  await (await edit.waitForSelector('input[placeholder="Nom du pack"]')).type('smoke')
   await click(edit, 'Créer')
-  await expectText(edit, '1 Pack')
-  await click(edit, '4 Pistes')
+  // The guided setup: one player each, one classic round, then its first question.
+  await expectText(edit, 'Qui joue ?')
+  await click(edit, 'Suivant')
+  await click(edit, 'Classique')
+  await click(edit, 'Terminer')
+  await expectText(edit, 'Question 1')
   const media = [join(home, 'Artist - First.wav'), join(home, 'Artist - Second.wav')]
-  media.forEach((p) => writeFileSync(p, wav(3)))
-  await (await edit.$('.dropzone input[type=file]')).uploadFile(...media)
-  await expectText(edit, 'Artist - Second.wav')
+  media.forEach((p, i) => writeFileSync(p, wav(3 + i))) // different files: identical ones are one song
+  const dropInQuestion = async (file) => (await edit.waitForSelector('.question .dropzone input[type=file]')).uploadFile(file)
+  await dropInQuestion(media[0])
+  await expectText(edit, 'Artist · First')
+  await until(edit, () => !!document.querySelector('.question .waveform canvas'))
+  await click(edit, '+ question')
+  await expectText(edit, 'Question 2')
+  await dropInQuestion(media[1])
+  await expectText(edit, 'Artist · Second')
+
+  // A theme gets its own questions, each with its file.
+  await (await edit.waitForSelector('.new-theme input')).type('Rock')
+  await click(edit, '+ thème')
+  await expectText(edit, 'Thème · Rock')
+  await (await edit.waitForSelector('.outline .theme > button')).evaluate((b) => b.click())
+  await expectText(edit, 'Question 3')
+  await dropInQuestion(media[1])
+  await until(edit, () => document.querySelector('.outline .theme .questions')?.innerText.includes('Artist · Second'))
+  // The same song dropped again in bulk is not added a second time.
+  await (await edit.waitForSelector('.outline > .dropzone input[type=file]')).uploadFile(media[0])
+  await expectText(edit, 'Déjà dans le pack')
+  // A question dragged from its theme to the round, then back.
+  const drag = (from, to) =>
+    edit.evaluate(
+      (from, to) => {
+        const data = new DataTransfer()
+        document.querySelector(from).dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }))
+        document.querySelector(to).dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }))
+      },
+      from,
+      to,
+    )
+  await drag('.outline .theme .questions li', '.outline > section:first-child')
+  await until(edit, () => document.querySelectorAll('.outline > section:first-child .questions li').length === 3)
+  await drag('.outline > section:first-child .questions li:last-child', '.outline .theme')
+  await until(edit, () => document.querySelectorAll('.outline > section:first-child .questions li').length === 2 && !!document.querySelector('.outline .theme .questions li'))
+
+  await click(edit, '1. Artist · First')
+  await click(edit, 'un autre fichier (le morceau')
+  const outroChoice = (await edit.$$('.question .media-choice select')).at(-1)
+  await outroChoice.select('Artist - Second.wav')
+  await until(edit, () => document.querySelectorAll('.question .waveform').length === 2)
 
   await click(edit, '+ manche')
-  await click(edit, 'Enregistrer')
-  await expectText(edit, 'aucune piste dans la manche')
+  await click(edit, 'Thème entier')
+  await expectText(edit, 'Chaque choix enchaîne toutes les questions du thème')
+  await expectText(edit, 'aucun thème choisi')
+  // A theme created in the round is drawn by it and listed under it.
+  await (await edit.waitForSelector('.panel .new-theme input')).type('Jazz\n')
+  await expectText(edit, 'Thème · Jazz')
+  await until(edit, () => [...document.querySelectorAll('.outline > section')].some((s) => s.innerText.includes('Manche 2') && s.innerText.includes('Jazz')))
+  await click(edit, 'Manche 2')
   await click(edit, 'Supprimer')
-  await click(edit, 'Enregistrer')
-  await click(edit, 'Export')
+  await click(edit, 'Exporter')
   await expectText(edit, 'Le pack est jouable.')
   await click(edit, 'Exporter en .linospack')
   await expectText(edit, 'Exporté : packs/smoke.linospack')
@@ -122,9 +171,9 @@ try {
 
   // A game: the TV, one phone, one track bought by a buzz and validated.
   host = await open('/host')
-  await host.click('main')
+  await (await host.waitForSelector('main')).click()
   phone = await open('/play', { width: 390, height: 800, isMobile: true })
-  await phone.type('input[name=name]', 'Alice')
+  await (await phone.waitForSelector('input[name=name]')).type('Alice')
   await click(phone, 'Rejoindre')
   await click(phone, 'Je suis prêt')
   await until(control, () => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('Lancer la partie') && !b.disabled))
@@ -135,15 +184,22 @@ try {
   await until(phone, () => !!document.querySelector('button.buzz:not([disabled])'))
   // The buzzer reacts on pointerdown; a real click would wait for the background tab to paint.
   await phone.$eval('button.buzz', (b) => b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
-  await until(control, () => !!document.querySelector('button.good'))
-  await (await control.$('button.good')).evaluate((b) => b.click())
+  // The gamemaster ticks the artist only, then validates.
+  await until(control, () => !!document.querySelector('.validation input[type=checkbox]'))
+  await (await control.$('.validation input[type=checkbox]')).evaluate((c) => c.click())
+  await (await control.$('.validation button.primary')).evaluate((b) => b.click())
   // One of the two guesses found: the phone and the control page show the points.
-  await expectText(phone, 'Bravo ! +100')
-  await until(control, () => /Alice\s*100/.test(document.body.innerText))
-  console.log('smoke: editor, export, control, TV and phone OK')
+  // Speed scoring: a slow machine buzzes a little later and earns a little less than 100.
+  await until(phone, () => /Bravo ! \+\d+/.test(document.body.innerText))
+  await until(control, () => /Alice\s*\d+/.test(document.body.innerText))
+  // Ending the track: the TV plays the outro file instead of the rest of the question.
+  await click(control, 'Passer la piste')
+  await until(host, () => decodeURIComponent(document.querySelector('.stage video')?.src ?? '').endsWith('Artist - Second.wav'))
+  console.log('smoke: editor, export, control, TV with outro file, and phone OK')
 } catch (e) {
   failed = true
   console.error('smoke failed:', e.message, e.stack.split('\n').find((l) => l.includes('smoke.mjs')))
+  if (edit) console.error('editor:', await edit.evaluate(() => document.body.innerText.slice(0, 600)))
   if (phone) console.error('phone:', await phone.evaluate(() => ({ text: document.body.innerText.slice(0, 300), buzz: document.querySelector('button.buzz')?.outerHTML })))
   if (host) console.error('TV:', await host.evaluate(() => { const v = document.querySelector('.stage video'); return { text: document.body.innerText.slice(0, 200), media: v && { src: v.src, ready: v.readyState, paused: v.paused, error: v.error?.code, net: v.networkState } } }))
 } finally {

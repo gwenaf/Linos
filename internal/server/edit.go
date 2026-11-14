@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/gwenaf/linos/internal/pack"
@@ -19,7 +20,7 @@ import (
 )
 
 // editor serves /edit and its API: host machine only, and only folder packs of packsDir are written.
-func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
+func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc, hostOnly func(http.HandlerFunc) http.HandlerFunc) {
 	mux.HandleFunc("GET /edit", hostOnly(page))
 
 	// Folder packs are edited in place; archives are listed so they can be unpacked into a folder.
@@ -34,6 +35,65 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 			}
 		}
 		writeJSON(w, map[string][]string{"folders": folders, "archives": archives})
+	}))
+
+	// Quick start: audio files become a new folder pack, its guesses read from their tags.
+	mux.HandleFunc("POST /api/import", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		files, err := r.MultipartReader()
+		if err != nil {
+			http.Error(w, "expected a multipart upload of audio files", http.StatusBadRequest)
+			return
+		}
+		q := r.URL.Query()
+		start, _ := strconv.ParseFloat(q.Get("start"), 64)       // missing or invalid: 0
+		duration, _ := strconv.ParseFloat(q.Get("duration"), 64) // missing or invalid: pack default
+		res, err := tags.Import(packsDir, files, tags.Options{Start: max(start, 0), Duration: duration, Via: q.Get("via")})
+		if err != nil {
+			slog.Warn("import failed", "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		slog.Info("music imported", "pack", res.Pack, "tracks", res.Tracks, "skipped", len(res.Skipped))
+		writeJSON(w, res)
+	}))
+
+	// A .linospack received from someone joins the library once it is checked: a pack is only data,
+	// media and a manifest, never a page or a program (see pack.IsMedia).
+	mux.HandleFunc("POST /api/edit/archives", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		files, err := r.MultipartReader()
+		if err != nil {
+			http.Error(w, "expected a multipart upload of .linospack files", http.StatusBadRequest)
+			return
+		}
+		os.MkdirAll(packsDir, 0o755) // Save reports any failure
+		saved, err := tags.Save(packsDir, files, func(name string) bool { return filepath.Ext(name) == ".linospack" })
+		invalid := map[string]string{}
+		for _, name := range saved.New {
+			p, openErr := pack.Open(filepath.Join(packsDir, name))
+			if openErr != nil {
+				os.Remove(filepath.Join(packsDir, name))
+				invalid[name] = openErr.Error()
+				continue
+			}
+			p.Close()
+			slog.Info("pack added", "file", name)
+		}
+		if err != nil {
+			slog.Warn("pack upload failed", "error", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"saved": saved.New, "existing": saved.Existing, "skipped": saved.Skipped, "invalid": invalid})
+	}))
+
+	mux.HandleFunc("GET /api/edit/archives/{name}", hostOnly(func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if !validPackName(name) || filepath.Ext(name) != ".linospack" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+		http.ServeFile(w, r, filepath.Join(packsDir, name))
 	}))
 
 	mux.HandleFunc("POST /api/edit/unpack", hostOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +145,7 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 		}
 		media := []string{}
 		fs.WalkDir(os.DirFS(dir), ".", func(p string, d fs.DirEntry, err error) error {
-			if err == nil && !d.IsDir() && tags.IsMedia(p) {
+			if err == nil && !d.IsDir() && pack.IsMedia(p) {
 				media = append(media, p)
 			}
 			return nil
@@ -120,23 +180,28 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 			http.Error(w, "expected a multipart upload of media files", http.StatusBadRequest)
 			return
 		}
-		saved, skipped, err := tags.Save(dir, files, tags.IsMedia)
+		saved, err := tags.Save(dir, files, pack.IsMedia)
 		if err != nil {
 			slog.Warn("media upload failed", "error", err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// Each saved file comes with the guesses its tags or name suggest, for a new track.
+		// Each file comes with the guesses its tags or name suggest, for a new track; a file the pack
+		// already had is flagged, so the editor can tell the song is already there.
 		type upload struct {
-			Media   string       `json:"media"`
-			Guesses []pack.Guess `json:"guesses"`
+			Media     string       `json:"media"`
+			Guesses   []pack.Guess `json:"guesses"`
+			Duplicate bool         `json:"duplicate,omitempty"`
 		}
 		uploads := []upload{}
-		for _, name := range saved {
-			uploads = append(uploads, upload{name, tags.Guesses(filepath.Join(dir, name))})
+		for _, name := range saved.New {
+			uploads = append(uploads, upload{name, tags.Guesses(filepath.Join(dir, name)), false})
 		}
-		slog.Info("media uploaded", "pack", r.PathValue("pack"), "files", len(saved), "skipped", len(skipped))
-		writeJSON(w, map[string]any{"uploads": uploads, "skipped": skipped})
+		for _, name := range saved.Existing {
+			uploads = append(uploads, upload{name, tags.Guesses(filepath.Join(dir, filepath.FromSlash(name))), true})
+		}
+		slog.Info("media uploaded", "pack", r.PathValue("pack"), "files", len(saved.New), "existing", len(saved.Existing), "skipped", len(saved.Skipped))
+		writeJSON(w, map[string]any{"uploads": uploads, "skipped": saved.Skipped})
 	})))
 
 	// ponytail: synchronous, the request lasts as long as ffmpeg; stream progress if big packs make it too long.
@@ -168,6 +233,11 @@ func editor(mux *http.ServeMux, packsDir string, page http.HandlerFunc) {
 	})))
 
 	mux.HandleFunc("GET /api/edit/{pack}/media/{name...}", hostOnly(withPack(packsDir, func(w http.ResponseWriter, r *http.Request, dir string) {
+		if !pack.IsMedia(r.PathValue("name")) {
+			http.NotFound(w, r)
+			return
+		}
+		inert(w)
 		http.ServeFileFS(w, r, os.DirFS(dir), r.PathValue("name"))
 	})))
 }
@@ -192,6 +262,28 @@ func reveal(path string) error {
 	default:
 		return Start("xdg-open", filepath.Dir(path))
 	}
+}
+
+// OpenBrowser shows url in the default browser.
+func OpenBrowser(url string) error {
+	switch goos {
+	case "windows":
+		return Start(rundll32(), "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		return Start("open", url)
+	default:
+		return Start("xdg-open", url)
+	}
+}
+
+// rundll32 is given by full path: System32, or even SystemRoot, may be missing from the environment
+// Linos inherits.
+func rundll32() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(root, "System32", "rundll32.exe")
 }
 
 // withPack resolves the {pack} path value to an existing folder pack.

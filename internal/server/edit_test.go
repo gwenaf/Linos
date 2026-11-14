@@ -17,15 +17,16 @@ import (
 )
 
 func TestEditorOff(t *testing.T) {
-	check(t, New(game.NewRoom(t.TempDir()), web, false), []request{
+	check(t, New(game.NewRoom(t.TempDir()), web, Options{}), []request{
 		{"page", "/edit", local, http.StatusNotFound, ""},
 		{"api", "/api/edit", local, http.StatusNotFound, ""},
+		{"import", "/api/import", local, http.StatusNotFound, ""},
 	})
 }
 
 func TestEditor(t *testing.T) {
 	packs := filepath.Join(t.TempDir(), "packs")
-	h := New(game.NewRoom(packs), web, true)
+	h := New(game.NewRoom(packs), web, Options{Edit: true})
 	do := func(method, path, contentType, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -80,9 +81,26 @@ func TestEditor(t *testing.T) {
 	if len(up.Uploads) != 1 || up.Uploads[0].Media != "Artist - Song.mp3" || len(up.Uploads[0].Guesses) != 2 {
 		t.Fatalf("uploads = %+v, want the mp3 with artist and title guesses", up)
 	}
+	// The same song again is not copied: the existing file comes back, flagged.
+	buf.Reset()
+	mw = multipart.NewWriter(&buf)
+	part, _ := mw.CreateFormFile("files", "copy.mp3")
+	part.Write([]byte("audio"))
+	mw.Close()
+	want(do("POST", "/api/edit/quiz/media", mw.FormDataContentType(), buf.String()), http.StatusOK, `"duplicate":true`)
+	if _, err := os.Stat(filepath.Join(packs, "quiz", "copy.mp3")); !os.IsNotExist(err) {
+		t.Fatalf("a duplicate upload must not be kept: %v", err)
+	}
 	want(do("POST", "/api/edit/quiz/media", "text/plain", "x"), http.StatusBadRequest, "multipart")
 	want(do("POST", "/api/edit/quiz/media", "multipart/form-data; boundary=b", "--b\r\nbroken"), http.StatusBadRequest, "")
-	want(do("GET", "/api/edit/quiz/media/Artist%20-%20Song.mp3", "", ""), http.StatusOK, "audio")
+	rec = do("GET", "/api/edit/quiz/media/Artist%20-%20Song.mp3", "", "")
+	want(rec, http.StatusOK, "audio")
+	if rec.Header().Get("Content-Security-Policy") != "sandbox" {
+		t.Fatal("pack media must be served sandboxed")
+	}
+	// Only media: an unpacked page or the manifest is never served.
+	os.WriteFile(filepath.Join(packs, "quiz", "page.html"), []byte("<script>"), 0o644)
+	want(do("GET", "/api/edit/quiz/media/page.html", "", ""), http.StatusNotFound, "")
 	want(do("GET", "/api/edit/quiz", "", ""), http.StatusOK, `"media":["Artist - Song.mp3"]`)
 
 	manifest := `{"version":1,"title":"Quiz","tracks":[{"id":"t1","media":"Artist - Song.mp3",` +
@@ -109,6 +127,39 @@ func TestEditor(t *testing.T) {
 	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"quiz"}`), http.StatusBadRequest, "invalid archive name")
 	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"../x.linospack"}`), http.StatusBadRequest, "invalid archive name")
 	want(do("POST", "/api/edit/unpack", "application/json", `{"name":"old.linospack"}`), http.StatusBadRequest, "zip")
+
+	// Download the archive, then send it back as someone receiving it would: a valid one is added,
+	// an invalid one is removed, other files are skipped, and a file already there is not copied again.
+	rec = do("GET", "/api/edit/archives/quiz.linospack", "", "")
+	want(rec, http.StatusOK, "")
+	if rec.Header().Get("Content-Disposition") != `attachment; filename="quiz.linospack"` {
+		t.Fatalf("download headers = %v", rec.Header())
+	}
+	archive := rec.Body.Bytes()
+	want(do("GET", "/api/edit/archives/quiz", "", ""), http.StatusNotFound, "")
+	want(do("GET", "/api/edit/archives/a:b.linospack", "", ""), http.StatusNotFound, "")
+	os.Remove(filepath.Join(packs, "quiz.linospack"))
+	sendArchives := func(files map[string][]byte) *httptest.ResponseRecorder {
+		buf.Reset()
+		mw = multipart.NewWriter(&buf)
+		for name, body := range files {
+			part, _ := mw.CreateFormFile("files", name)
+			part.Write(body)
+		}
+		mw.Close()
+		return do("POST", "/api/edit/archives", mw.FormDataContentType(), buf.String())
+	}
+	rec = sendArchives(map[string][]byte{"received.linospack": archive, "fake.linospack": []byte("not a pack"), "notes.txt": nil})
+	for _, part := range []string{`"received.linospack"`, `"fake.linospack":"`, `"skipped":["notes.txt"]`} {
+		want(rec, http.StatusOK, part)
+	}
+	if _, err := os.Stat(filepath.Join(packs, "fake.linospack")); !os.IsNotExist(err) {
+		t.Fatalf("invalid archive kept: %v", err)
+	}
+	want(sendArchives(map[string][]byte{"again.linospack": archive}), http.StatusOK, `"existing":["received.linospack"],"invalid":{},"saved":[]`)
+	os.Rename(filepath.Join(packs, "received.linospack"), filepath.Join(packs, "quiz.linospack")) // the export, as before
+	want(do("POST", "/api/edit/archives", "text/plain", "x"), http.StatusBadRequest, "multipart")
+	want(do("POST", "/api/edit/archives", "multipart/form-data; boundary=b", "--b\r\nbroken"), http.StatusBadRequest, "")
 
 	want(do("PUT", "/api/edit/quiz", "application/json", `{"version":1,"title":""}`), http.StatusOK, "title is required")
 	want(do("POST", "/api/edit/quiz/export", "", ""), http.StatusBadRequest, "title is required")
