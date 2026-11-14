@@ -1,6 +1,7 @@
 # Publishes a release on each version tag (git tag v0.1.0 && git push origin v0.1.0); a tag with a
 # suffix (v0.1.0-alpha) is marked as a prerelease. Tag-only trigger and one Linux runner, which
 # cross-compiles every platform, keep Actions usage minimal.
+# Actions are pinned by commit: a moved tag cannot change what runs with the release permissions.
 name: release
 
 on:
@@ -15,18 +16,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: lts/*
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - run: npm ci && npm run build
         working-directory: web
-      - run: go vet ./... && go test ./...
+      - run: go vet ./... && sh scripts/coverage.sh
       # Browser smoke test, with the runner's Chrome.
       - run: node e2e/smoke.mjs
         working-directory: web
@@ -46,12 +47,12 @@ jobs:
       # and secret SIGNPATH_API_TOKEN. The signed linos.exe replaces the unsigned one.
       - id: unsigned
         if: vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: linos-unsigned
           path: out/linos.exe
       - if: vars.SIGNPATH_ORGANIZATION_ID != ''
-        uses: signpath/github-action-submit-signing-request@v3
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
         with:
           connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -71,12 +72,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       # Docker image for self-hosting (linux/amd64), see the Dockerfile.
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true

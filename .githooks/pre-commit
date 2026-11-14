@@ -12,6 +12,7 @@ if [ -n "$go_files" ]; then
     exit 1
   fi
   go vet ./...
+  sh scripts/coverage.sh
 fi
 
 web_files=$(echo "$staged" | grep '^web/.*\.\(ts\|tsx\|vue\)$' || true)
